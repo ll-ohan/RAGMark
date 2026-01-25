@@ -1,0 +1,44 @@
+name: CI Quality Gate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality:
+    name: 🛡️ Quality & Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[all]"  # Installe tout pour les tests
+
+      - name: 🚨 Linting (Ruff & Mypy)
+        run: |
+          ruff check
+          mypy .
+
+
+      - name: 🧪 Unit Tests & Coverage
+        run: |
+          pytest --cov=src/ragmark --cov-report=xml --cov-report=term tests/
+
+      # Upload coverage to Codecov
+      # - name: Upload coverage
+      #   uses: codecov/codecov-action@v3
