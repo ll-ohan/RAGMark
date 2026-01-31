@@ -18,33 +18,30 @@ class RetrieverFactory:
 
     @staticmethod
     def create(config: RetrievalConfig, index: VectorIndex) -> BaseRetriever:
-        """Create a retriever from configuration.
+        """Instantiate a retriever based on the provided configuration.
 
         Args:
-            config: Retrieval configuration.
-            index: Vector index to search.
+            config: The retrieval configuration.
+            index: The vector index to search.
 
         Returns:
-            Configured retriever instance, optionally wrapped with reranking.
+            The configured retriever instance, optionally wrapped with reranking.
 
         Raises:
-            ValueError: If configuration is invalid.
+            ValueError: If the configuration is invalid.
             UnsupportedBackendError: If required dependencies are missing.
         """
-        # Create refiner if configured
         refiner = None
         if config.reranker is not None:
             from ragmark.retrieval.rerankers import CrossEncoderRefiner
 
             refiner = CrossEncoderRefiner.from_config(config.reranker)
 
-        # If reranker present, return RefinedRetriever
         if refiner is not None:
             from ragmark.retrieval.strategies import RefinedRetriever
 
             return RefinedRetriever.from_config(config, index, refiner=refiner)
 
-        # Otherwise, create appropriate base retriever
         mode = config.mode
         if mode == "dense":
             from ragmark.retrieval.strategies import DenseRetriever

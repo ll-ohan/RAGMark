@@ -2450,6 +2450,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "tiktoken" },
     { name = "tqdm" },
     { name = "typer" },
@@ -2469,6 +2471,7 @@ all = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "qdrant-client" },
+    { name = "reportlab" },
     { name = "ruff" },
     { name = "sentence-transformers" },
     { name = "torch" },
@@ -2486,6 +2489,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "reportlab" },
     { name = "ruff" },
     { name = "types-pyyaml" },
     { name = "types-tqdm" },
@@ -2525,8 +2529,10 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "qdrant-client", marker = "extra == 'db'", specifier = ">=1.7" },
     { name = "ragmark", extras = ["ingest", "db", "llm", "embed", "dev"], marker = "extra == 'all'" },
+    { name = "reportlab", marker = "extra == 'dev'", specifier = ">=4.4" },
     { name = "rich", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1" },
+    { name = "scipy", specifier = ">=1.10" },
     { name = "sentence-transformers", marker = "extra == 'embed'", specifier = ">=2.2" },
     { name = "tiktoken", specifier = ">=0.5" },
     { name = "torch", marker = "extra == 'embed'", specifier = ">=2.0" },
@@ -2694,6 +2700,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ed/e3/c446a64984ea9f69982ba1a69d4658d5014bc7a0ea468a07e1a1265db6e2/regex-2024.11.6-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:4f51f88c126370dcec4908576c5a627220da6c09d0bff31cfa89f2523843316d", size = 787733, upload-time = "2024-11-06T20:11:11.256Z" },
     { url = "https://files.pythonhosted.org/packages/2b/f1/e40c8373e3480e4f29f2692bd21b3e05f296d3afebc7e5dcf21b9756ca1c/regex-2024.11.6-cp313-cp313-win32.whl", hash = "sha256:63b13cfd72e9601125027202cad74995ab26921d8cd935c25f09c630436348ff", size = 262122, upload-time = "2024-11-06T20:11:13.161Z" },
     { url = "https://files.pythonhosted.org/packages/45/94/bc295babb3062a731f52621cdc992d123111282e291abaf23faa413443ea/regex-2024.11.6-cp313-cp313-win_amd64.whl", hash = "sha256:2b3361af3198667e99927da8b84c1b010752fa4b1115ee30beaa332cabc3ef1a", size = 273545, upload-time = "2024-11-06T20:11:15Z" },
+]
+
+[[package]]
+name = "reportlab"
+version = "4.4.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "charset-normalizer" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1a/39/42cf24aee570a80e1903221ae3a92a2e34c324794a392eb036cbb6dc3839/reportlab-4.4.9.tar.gz", hash = "sha256:7cf487764294ee791a4781f5a157bebce262a666ae4bbb87786760a9676c9378", size = 3911246, upload-time = "2026-01-15T10:07:56.08Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl", hash = "sha256:68e2d103ae8041a37714e8896ec9b79a1c1e911d68c3bd2ea17546568cf17bfd", size = 1954401, upload-time = "2026-01-15T09:27:59.133Z" },
 ]
 
 [[package]]

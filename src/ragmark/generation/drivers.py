@@ -47,7 +47,7 @@ class BaseLLMDriver(ABC):
         pass
 
     @abstractmethod
-    async def generate_stream(
+    def generate_stream(
         self,
         prompt: str,
         max_tokens: int,
@@ -96,7 +96,7 @@ class BaseLLMDriver(ABC):
         pass
 
     async def __aenter__(self) -> "BaseLLMDriver":
-        """Async context manager entry.
+        """Enter the async context manager.
 
         Returns:
             Self for use in async with statements.
@@ -110,7 +110,7 @@ class BaseLLMDriver(ABC):
         _exc_val: BaseException | None,
         _exc_tb: Any,
     ) -> None:
-        """Async context manager exit.
+        """Exit the async context manager.
 
         Implementations should clean up model resources here.
         """

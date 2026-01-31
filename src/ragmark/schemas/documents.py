@@ -5,15 +5,23 @@ documents and their fragmented knowledge nodes throughout the ingestion
 and indexing pipeline.
 """
 
+import hashlib
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 
 class SourceDoc(BaseModel):
-    """Represents an ingested source document.
+    """Ingested source document.
 
     This model captures the raw text content extracted from a source file,
     along with metadata that helps track provenance and support filtering.
@@ -46,7 +54,7 @@ class SourceDoc(BaseModel):
         """Validate that content is not empty or whitespace-only.
 
         Args:
-            v: Content string to validate.
+            v: Content to validate.
 
         Returns:
             The validated content.
@@ -57,6 +65,21 @@ class SourceDoc(BaseModel):
         if not v or not v.strip():
             raise ValueError("Content cannot be empty or whitespace-only")
         return v
+
+    @model_validator(mode="after")
+    def compute_content_hash(self) -> "SourceDoc":
+        """Compute SHA-256 hash of content for source_id if not explicitly set.
+
+        This ensures that identical content produces the same source_id,
+        enabling deduplication. If source_id appears to be a UUID (default),
+        replace it with a SHA-256 hash of the content.
+
+        Returns:
+            Self with computed source_id.
+        """
+        if len(self.source_id) == 36 and self.source_id.count("-") == 4:
+            self.source_id = hashlib.sha256(self.content.encode("utf-8")).hexdigest()
+        return self
 
 
 class NodePosition(BaseModel):
@@ -114,8 +137,8 @@ class KnowledgeNode(BaseModel):
         source_id: Reference to the parent SourceDoc.
         metadata: Inherited metadata from source plus computed metadata.
         position: Position information within the source document.
-        dense_vector: Optional pre-computed dense embedding.
-        sparse_vector: Optional pre-computed sparse embedding (token_id -> weight).
+        dense_vector: Pre-computed dense embedding vector.
+        sparse_vector: Pre-computed sparse embedding (token_id -> weight).
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -146,7 +169,7 @@ class KnowledgeNode(BaseModel):
         """Validate that content is not empty or whitespace-only.
 
         Args:
-            v: Content string to validate.
+            v: Content to validate.
 
         Returns:
             The validated content.
@@ -161,15 +184,30 @@ class KnowledgeNode(BaseModel):
     def model_post_init(self, __context: Any) -> None:
         """Enrich metadata with computed fields after model initialization.
 
-        This automatically adds char_count, word_count, and created_at
+        This automatically adds char_count, word_count, language, and created_at
         to metadata if they don't already exist.
         """
         if "char_count" not in self.metadata:
             self.metadata["char_count"] = len(self.content)
         if "word_count" not in self.metadata:
             self.metadata["word_count"] = len(self.content.split())
+        if "language" not in self.metadata:
+            self.metadata["language"] = self._detect_language()
         if "created_at" not in self.metadata:
             self.metadata["created_at"] = datetime.now(timezone.utc).isoformat()
+
+    def _detect_language(self) -> str:
+        """Detect the language of the content.
+
+        Returns:
+            ISO 639-1 language code (e.g., 'en', 'fr') or 'unknown' if detection fails.
+        """
+        from langdetect import LangDetectException, detect
+
+        try:
+            return cast(str, detect(self.content))
+        except (ImportError, LangDetectException):
+            return "unknown"
 
 
 class VectorPayload(BaseModel):
@@ -181,7 +219,7 @@ class VectorPayload(BaseModel):
     Attributes:
         node_id: Unique identifier matching the KnowledgeNode.
         dense_vector: Dense embedding vector.
-        sparse_vector: Optional sparse embedding.
+        sparse_vector: Sparse embedding (token_id -> weight).
         content: Original text content.
         metadata: Full metadata dictionary.
     """
@@ -192,7 +230,7 @@ class VectorPayload(BaseModel):
     dense_vector: list[float] = Field(..., description="Dense embedding vector")
     sparse_vector: dict[int, float] | None = Field(
         None,
-        description="Optional sparse embedding",
+        description="Sparse embedding (token_id -> weight)",
     )
     content: str = Field(..., description="Original text content")
     metadata: dict[str, Any] = Field(

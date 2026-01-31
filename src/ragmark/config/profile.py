@@ -102,7 +102,7 @@ class EmbedderConfig(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    model_name: str = Field(
+    model_name: str | Path = Field(
         default="sentence-transformers/all-MiniLM-L6-v2",
         description="HuggingFace model identifier or local path",
     )
@@ -129,7 +129,7 @@ class IndexConfig(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    backend: Literal["memory", "qdrant", "milvus", "lancedb"] = Field(
+    backend: Literal["memory", "qdrant", "milvus", "lancedb", "custom_backend"] = Field(
         default="memory",
         description="Vector database backend",
     )
@@ -147,6 +147,22 @@ class IndexConfig(BaseModel):
         None,
         description="Backend-specific connection parameters (host, port, api_key)",
     )
+
+    @model_validator(mode="after")
+    def connection_required_for_remote_backends(self) -> "IndexConfig":
+        """Validate that connection is provided for remote backends.
+
+        Returns:
+            Validated IndexConfig instance.
+
+        Raises:
+            ValueError: If connection is None for qdrant, milvus, or lancedb.
+        """
+        if self.backend in ("qdrant", "milvus", "lancedb") and self.connection is None:
+            raise ValueError(
+                f"Connection parameters are required for backend '{self.backend}'"
+            )
+        return self
 
 
 class RerankerConfig(BaseModel):
@@ -342,12 +358,12 @@ class ExperimentProfile(BaseModel):
         default_factory=lambda: RetrievalConfig(alpha=None, reranker=None),
         description="Retrieval configuration",
     )
-    generator: GeneratorConfig = Field(
-        ...,
+    generator: GeneratorConfig | None = Field(
+        default=None,
         description="LLM generation configuration",
     )
-    evaluation: EvaluationConfig = Field(
-        ...,
+    evaluation: EvaluationConfig | None = Field(
+        default=None,
         description="Evaluation configuration",
     )
 
@@ -374,9 +390,7 @@ class ExperimentProfile(BaseModel):
             with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
 
-            # Resolve relative paths relative to the YAML file's directory
-            base_dir = path.parent
-            data = cls._resolve_paths(data, base_dir)
+            data = cls._resolve_paths(data, path.parent)
 
             return cls.model_validate(data)
         except yaml.YAMLError as e:
@@ -386,34 +400,19 @@ class ExperimentProfile(BaseModel):
 
     @staticmethod
     def _resolve_paths(data: Any, base_dir: Path) -> Any:
-        """Recursively resolve relative paths in configuration data.
-
-        Args:
-            data: Configuration data (dict, list, str, or other types).
-            base_dir: Base directory for resolving relative paths.
-
-        Returns:
-            Configuration with resolved paths.
-        """
         if isinstance(data, dict):
             return {
                 k: ExperimentProfile._resolve_paths(v, base_dir)
                 for k, v in cast(dict[str, Any], data).items()
             }
         elif isinstance(data, list):
-            return [
-                ExperimentProfile._resolve_paths(item, base_dir)
-                for item in cast(list[Any], data)  # type: ignore [redundant-cast]
-            ]
+            return [ExperimentProfile._resolve_paths(item, base_dir) for item in data]
         elif isinstance(data, str):
-            is_path = (
-                data.endswith((".pt", ".gguf", ".jsonl", ".json", ".yaml", ".yml"))
-                or data.startswith(("./", "../", "/", "~"))
-                or "\\" in data
+            is_path = data.startswith(("./", "../", "/", "~", "\\")) or data.endswith(
+                (".pt", ".gguf", ".jsonl", ".json", ".yaml", ".yml", ".txt")
             )
 
             if is_path:
-                # Convert to Path object and resolve if relative
                 path = Path(data)
                 if not path.is_absolute():
                     return base_dir / path
@@ -428,7 +427,6 @@ class ExperimentProfile(BaseModel):
         """
 
         def convert_paths_to_str(obj: Any) -> Any:
-            """Recursively convert Path objects to strings."""
             if isinstance(obj, Path):
                 return str(obj)
             elif isinstance(obj, dict):
@@ -437,10 +435,7 @@ class ExperimentProfile(BaseModel):
                     for k, v in cast(dict[str, Any], obj).items()
                 }
             elif isinstance(obj, list):
-                return [
-                    convert_paths_to_str(item)
-                    for item in cast(list[Any], obj)  # type: ignore [redundant-cast]
-                ]
+                return [convert_paths_to_str(item) for item in obj]
             return obj
 
         data = self.model_dump(mode="python")
@@ -514,7 +509,6 @@ class ExperimentProfile(BaseModel):
         def _diff_recursive(
             d1: dict[str, Any], d2: dict[str, Any], prefix: str = ""
         ) -> dict[str, tuple[Any, Any]]:
-            """Recursively compute differences."""
             diffs: dict[str, tuple[Any, Any]] = {}
             all_keys = set(d1.keys()) | set(d2.keys())
             for key in all_keys:

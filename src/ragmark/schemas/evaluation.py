@@ -4,9 +4,10 @@ This module defines data structures for benchmark trial cases,
 evaluation results, and audit reports.
 """
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 import pandas as pd
@@ -56,7 +57,7 @@ class TrialCase(BaseModel):
         """Validate that question is not empty.
 
         Args:
-            v: Question string to validate.
+            v: The question to validate.
 
         Returns:
             The validated question.
@@ -69,7 +70,11 @@ class TrialCase(BaseModel):
         return v
 
     def model_post_init(self, __context: Any) -> None:
-        """Validate that at least one ground truth is provided."""
+        """Validate that at least one ground truth is provided.
+
+        Raises:
+            ValueError: If neither ground_truth_answer nor ground_truth_node_ids is provided.
+        """
         if self.ground_truth_answer is None and self.ground_truth_node_ids is None:
             raise ValueError(
                 "At least one of ground_truth_answer or ground_truth_node_ids must be provided"
@@ -80,17 +85,15 @@ class TrialCase(BaseModel):
         """Load trial cases from a JSON or JSONL file.
 
         Args:
-            path: Path to the file containing trial cases.
+            path: Location of the file containing trial cases.
 
         Returns:
-            List of loaded TrialCase instances.
+            The loaded trial cases.
 
         Raises:
             ValueError: If file format is not supported.
             FileNotFoundError: If file does not exist.
         """
-        import json
-
         if not path.exists():
             raise FileNotFoundError(f"Trial cases file not found: {path}")
 
@@ -102,12 +105,9 @@ class TrialCase(BaseModel):
                         cases.append(cls.model_validate_json(line))
         elif path.suffix == ".json":
             with open(path, encoding="utf-8") as f:
-                data = json.load(f)
+                data: list[dict[str, Any]] | dict[str, Any] = json.load(f)
                 if isinstance(data, list):
-                    cases = [
-                        cls.model_validate(item)
-                        for item in cast(list[Any], data)  # type: ignore [redundant-cast]
-                    ]
+                    cases = [cls.model_validate(item) for item in data]
                 else:
                     cases = [cls.model_validate(data)]
         else:
@@ -217,7 +217,7 @@ class AuditReport(BaseModel):
         """Export report to JSON file.
 
         Args:
-            path: Output file path.
+            path: Destination for the output file.
             indent: JSON indentation level.
         """
         with open(path, "w", encoding="utf-8") as f:
@@ -227,7 +227,7 @@ class AuditReport(BaseModel):
         """Convert per-case results to a pandas DataFrame.
 
         Returns:
-            DataFrame with one row per case result.
+            A table containing one row per case result.
         """
         rows: list[dict[str, Any]] = []
         for result in self.per_case_results:
@@ -238,15 +238,12 @@ class AuditReport(BaseModel):
                 "num_retrieved": len(result.trace.retrieved_nodes),
                 "reranked": result.trace.reranked,
             }
-            # Add case-level metrics
             row.update(result.case_metrics)
-            # Add generation metrics if available
             if result.generation_result:
-                row["prompt_tokens"] = result.generation_result.usage.prompt_tokens
-                row[
-                    "completion_tokens"
-                ] = result.generation_result.usage.completion_tokens
-                row["finish_reason"] = result.generation_result.finish_reason
+                gen_result = result.generation_result
+                row["prompt_tokens"] = gen_result.usage.prompt_tokens
+                row["completion_tokens"] = gen_result.usage.completion_tokens
+                row["finish_reason"] = gen_result.finish_reason
             rows.append(row)
 
         return pd.DataFrame(rows)

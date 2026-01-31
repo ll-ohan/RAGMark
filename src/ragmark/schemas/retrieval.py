@@ -1,7 +1,7 @@
 """Retrieval data models.
 
-This module defines data structures for representing search results,
-retrieved nodes, and retrieval trace contexts.
+Defines data structures for representing search results, retrieved nodes,
+and retrieval trace contexts.
 """
 
 from typing import Any
@@ -12,7 +12,7 @@ from ragmark.schemas.documents import KnowledgeNode
 
 
 class SearchResult(BaseModel):
-    """A single search result from a vector index.
+    """Represents a single search result from a vector index.
 
     This minimal structure represents a match from the index,
     optionally including the full node data.
@@ -20,7 +20,7 @@ class SearchResult(BaseModel):
     Attributes:
         node_id: Unique identifier of the matched node.
         score: Similarity or relevance score.
-        node: Optional full KnowledgeNode (if include_vectors=True).
+        node: Full node data if requested.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -34,14 +34,14 @@ class SearchResult(BaseModel):
 
 
 class RetrievedNode(BaseModel):
-    """A retrieved node with its ranking information.
+    """Represents a retrieved node with ranking information.
 
-    This extends SearchResult with rank information for tracking
-    position in the retrieval results.
+    Wraps a node with rank information for tracking position in
+    retrieval results.
 
     Attributes:
-        node: The full KnowledgeNode that was retrieved.
-        score: Similarity or relevance score (may be reranked).
+        node: The retrieved node.
+        score: Similarity or relevance score.
         rank: Position in the final ranked list (1-indexed).
     """
 
@@ -55,17 +55,17 @@ class RetrievedNode(BaseModel):
 
 
 class TraceContext(BaseModel):
-    """Complete trace of a retrieval operation.
+    """Captures the complete trace of a retrieval operation.
 
-    This model captures all information about a retrieval operation,
-    including the query, results, metadata about the retrieval process,
-    and whether reranking was applied.
+    Captures all information about a retrieval operation, including the query,
+    results, metadata about the retrieval process, and whether reranking
+    was applied.
 
     Attributes:
-        query: The original user query string.
-        retrieved_nodes: List of retrieved and ranked nodes.
-        retrieval_metadata: Timing, strategy, and other process metadata.
-        reranked: Whether reranking was applied to the results.
+        query: The original user query.
+        retrieved_nodes: Retrieved and ranked nodes.
+        retrieval_metadata: Metadata about the retrieval process.
+        reranked: Indicates if reranking was applied.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")

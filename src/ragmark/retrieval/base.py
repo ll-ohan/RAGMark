@@ -4,6 +4,7 @@ This module defines the contracts for retrieval strategies and
 reranking/refinement operations.
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class BaseRetriever(ABC):
-    """Abstract base class for retrieval strategies.
+    """Defines the contract for retrieval strategies.
 
     Retrievers are responsible for finding relevant knowledge nodes
     given a user query. They encapsulate the embedding, search, and
@@ -33,15 +34,15 @@ class BaseRetriever(ABC):
         index: "VectorIndex",
         refiner: "BaseRefiner | None" = None,
     ) -> "BaseRetriever":
-        """Instantiate retriever from configuration.
+        """Instantiate a retriever from configuration.
 
         Args:
-            config: RetrievalConfig instance.
-            index: Vector index to search.
-            refiner: Optional refiner for reranking.
+            config: The retrieval configuration.
+            index: The vector index to search.
+            refiner: The reranking strategy to apply, if any.
 
         Returns:
-            Configured retriever instance.
+            The configured retriever instance.
         """
         pass
 
@@ -50,14 +51,14 @@ class BaseRetriever(ABC):
         """Retrieve relevant knowledge nodes for a query.
 
         Args:
-            query: User query string.
-            top_k: Number of results to return.
+            query: The search query.
+            top_k: The maximum number of nodes to retrieve.
 
         Returns:
-            Complete trace context with retrieved nodes and metadata.
+            The trace containing nodes and metadata.
 
         Raises:
-            RetrievalError: If retrieval fails.
+            RetrievalError: If the underlying search operation fails.
         """
         pass
 
@@ -66,26 +67,24 @@ class BaseRetriever(ABC):
     ) -> list[TraceContext]:
         """Retrieve results for multiple queries concurrently.
 
-        Default implementation uses asyncio.gather for concurrent execution.
+        The default implementation uses asyncio.gather for concurrent execution.
 
         Args:
-            queries: List of query strings.
-            top_k: Number of results per query.
+            queries: The search queries.
+            top_k: The maximum number of nodes to retrieve per query.
 
         Returns:
-            List of trace contexts (one per query).
+            The traces corresponding to the input queries.
 
         Raises:
-            RetrievalError: If any retrieval fails.
+            RetrievalError: If any retrieval operation fails.
         """
-        import asyncio
-
         tasks = [self.retrieve(query, top_k) for query in queries]
         return await asyncio.gather(*tasks)
 
 
 class BaseRefiner(ABC):
-    """Abstract base class for reranking/refinement strategies.
+    """Defines the contract for reranking and refinement strategies.
 
     Refiners take an initial set of retrieved candidates and reorder
     them to improve precision, typically using more expensive models
@@ -95,13 +94,13 @@ class BaseRefiner(ABC):
     @classmethod
     @abstractmethod
     def from_config(cls, config: "RerankerConfig") -> "BaseRefiner":
-        """Instantiate refiner from configuration.
+        """Instantiate a refiner from configuration.
 
         Args:
-            config: RerankerConfig instance.
+            config: The reranker configuration.
 
         Returns:
-            Configured refiner instance.
+            The configured refiner instance.
         """
         pass
 
@@ -115,14 +114,14 @@ class BaseRefiner(ABC):
         """Rerank retrieved candidates.
 
         Args:
-            query: Original user query.
-            candidates: Initial retrieval results to rerank.
-            top_k: Number of results to keep after reranking.
+            query: The search query.
+            candidates: The nodes to reorder.
+            top_k: The maximum number of nodes to return.
 
         Returns:
-            Reranked list of retrieved nodes (truncated to top_k).
+            The reordered nodes.
 
         Raises:
-            RetrievalError: If reranking fails.
+            RetrievalError: If the reranking operation fails.
         """
         pass

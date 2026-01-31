@@ -30,13 +30,13 @@ class TokenUsage(BaseModel):
 class GenerationResult(BaseModel):
     """Result of an LLM generation operation.
 
-    This model captures the generated text along with metadata about
-    token usage and the reason generation stopped.
+    Captures the generated text along with metadata about token usage and the
+    reason generation stopped.
 
     Attributes:
-        text: The generated text completion.
+        text: Generated text completion.
         usage: Token usage statistics.
-        finish_reason: Why generation stopped (stop, length, or error).
+        finish_reason: Reason generation stopped.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
