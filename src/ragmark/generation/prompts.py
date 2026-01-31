@@ -100,9 +100,7 @@ class PromptTemplate:
             logger.error("Template file not found: path=%s", path)
             raise FileNotFoundError(f"Template file not found: {path}")
 
-        with open(path, encoding="utf-8") as f:
-            template = f.read()
-
+        template = path.read_text(encoding="utf-8")
         logger.info("Template loaded from file: path=%s, size=%d", path, len(template))
 
         return cls(template=template, input_variables=input_variables)
@@ -218,9 +216,7 @@ class StringPromptTemplate:
             logger.error("Template file not found: path=%s", path)
             raise FileNotFoundError(f"Template file not found: {path}")
 
-        with open(path, encoding="utf-8") as f:
-            template_str = f.read()
-
+        template_str = path.read_text(encoding="utf-8")
         logger.info(
             "String template loaded from file: path=%s, size=%d",
             path,
@@ -254,4 +250,44 @@ Question: {question}
 
 Answer:""",
     input_variables=["context", "question"],
+)
+
+RAG_SUMMARIZE_TEMPLATE = PromptTemplate(
+    template="""System: You are a summarization assistant. Create a concise summary based on the provided context.
+
+Context:
+{% for chunk in context_chunks %}
+{{ chunk }}
+
+{% endfor %}
+
+User: Please summarize the above context in 2-3 sentences, highlighting the main points.
+""",
+    input_variables=["context_chunks"],
+)
+
+RAG_CHAT_TEMPLATE = PromptTemplate(
+    template="""<|system|>
+You are a helpful AI assistant. Answer questions based on the conversation history and provided context.
+
+Context:
+{% for chunk in context_chunks %}
+{{ chunk }}
+
+{% endfor %}
+<|end|>
+
+{% for message in chat_history %}
+<|{{ message.role }}|>
+{{ message.content }}
+<|end|>
+{% endfor %}
+
+<|user|>
+{{ user_question }}
+<|end|>
+
+<|assistant|>
+""",
+    input_variables=["context_chunks", "chat_history", "user_question"],
 )

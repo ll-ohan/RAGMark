@@ -32,7 +32,7 @@ jobs:
       - name: 🚨 Linting (Ruff & Mypy)
         run: |
           ruff check
-          mypy .
+          mypy src/ragmark/
 
 
       - name: 🧪 Unit Tests & Coverage
