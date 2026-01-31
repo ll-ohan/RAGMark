@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ragmark.schemas.retrieval import TraceContext
+
 
 class TokenUsage(BaseModel):
     """Token usage statistics for an LLM generation.
@@ -47,3 +49,30 @@ class GenerationResult(BaseModel):
         ...,
         description="Reason generation stopped",
     )
+
+
+class AnswerResult(BaseModel):
+    """Result of RAG answer generation.
+
+    Complete result from RAG pipeline including the generated answer,
+    retrieval trace, generation metadata, and performance metrics.
+
+    Attributes:
+        answer: Generated answer text.
+        trace: Retrieval trace with retrieved nodes.
+        generation_result: LLM generation metadata.
+        total_time_ms: End-to-end latency in milliseconds.
+        sources: Optional source references.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    answer: str = Field(..., description="Generated answer text")
+    trace: TraceContext = Field(..., description="Retrieval trace with retrieved nodes")
+    generation_result: GenerationResult = Field(
+        ..., description="LLM generation metadata"
+    )
+    total_time_ms: float = Field(
+        ..., ge=0.0, description="End-to-end latency in milliseconds"
+    )
+    sources: list[str] | None = Field(None, description="Optional source references")

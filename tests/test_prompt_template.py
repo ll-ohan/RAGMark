@@ -1,4 +1,8 @@
-"""Unit and integration tests for prompt templating logic."""
+"""Test suite for prompt template rendering and error handling.
+
+Validates StringPromptTemplate (f-string based) and PromptTemplate (Jinja2 based)
+for formatting, Unicode robustness, file loading, and exception chaining.
+"""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -178,7 +182,15 @@ class TestStringPromptTemplate:
     def test_from_file_should_raise_error_when_file_missing(
         self, tmp_path: Path
     ) -> None:
-        """Verify that FileNotFoundError is raised for non-existent files."""
+        """Verify error handling for non-existent template files.
+
+        Given:
+            A path to a non-existent template file.
+        When:
+            Calling from_file with the missing path.
+        Then:
+            FileNotFoundError is raised.
+        """
         missing_file = tmp_path / "ghost.txt"
 
         with pytest.raises(FileNotFoundError):
@@ -358,3 +370,112 @@ class TestPromptTemplate:
 
         with pytest.raises(FileNotFoundError):
             PromptTemplate.from_file(missing_file, input_variables=[])
+
+    @pytest.mark.unit
+    def test_rag_summarize_template_renders_correctly(self) -> None:
+        """Verify RAG_SUMMARIZE_TEMPLATE renders with context chunks.
+
+        Given:
+            RAG_SUMMARIZE_TEMPLATE with context chunks.
+        When:
+            Rendering the template.
+        Then:
+            Output contains context chunks and summarization instruction.
+        """
+        from ragmark.generation.prompts import RAG_SUMMARIZE_TEMPLATE
+
+        result = RAG_SUMMARIZE_TEMPLATE.render(
+            context_chunks=["First chunk of information.", "Second chunk of data."]
+        )
+
+        assert "First chunk of information." in result
+        assert "Second chunk of data." in result
+        assert "summarize" in result.lower()
+
+    @pytest.mark.unit
+    def test_rag_summarize_template_requires_context_chunks(self) -> None:
+        """Verify RAG_SUMMARIZE_TEMPLATE raises error without required variable.
+
+        Given:
+            RAG_SUMMARIZE_TEMPLATE without context_chunks.
+        When:
+            Attempting to render.
+        Then:
+            ConfigError is raised for missing variable.
+        """
+        from ragmark.generation.prompts import RAG_SUMMARIZE_TEMPLATE
+
+        with pytest.raises(ConfigError, match="Missing required template variables"):
+            RAG_SUMMARIZE_TEMPLATE.render()
+
+    @pytest.mark.unit
+    def test_rag_chat_template_renders_with_history(self) -> None:
+        """Verify RAG_CHAT_TEMPLATE renders with conversation history.
+
+        Given:
+            RAG_CHAT_TEMPLATE with context, history, and user question.
+        When:
+            Rendering the template.
+        Then:
+            Output contains role markers, context, history, and question.
+        """
+        from ragmark.generation.prompts import RAG_CHAT_TEMPLATE
+
+        chat_history = [
+            {"role": "user", "content": "What is RAG?"},
+            {"role": "assistant", "content": "RAG is Retrieval-Augmented Generation."},
+        ]
+
+        result = RAG_CHAT_TEMPLATE.render(
+            context_chunks=["RAG combines retrieval with generation."],
+            chat_history=chat_history,
+            user_question="How does it work?",
+        )
+
+        assert "<|system|>" in result
+        assert "<|user|>" in result
+        assert "<|assistant|>" in result
+        assert "<|end|>" in result
+        assert "RAG combines retrieval" in result
+        assert "What is RAG?" in result
+        assert "How does it work?" in result
+
+    @pytest.mark.unit
+    def test_rag_chat_template_handles_empty_history(self) -> None:
+        """Verify RAG_CHAT_TEMPLATE handles empty conversation history.
+
+        Given:
+            RAG_CHAT_TEMPLATE with empty chat_history.
+        When:
+            Rendering the template.
+        Then:
+            Template renders without history section, only context and question.
+        """
+        from ragmark.generation.prompts import RAG_CHAT_TEMPLATE
+
+        result = RAG_CHAT_TEMPLATE.render(
+            context_chunks=["Context information."],
+            chat_history=[],
+            user_question="Test question?",
+        )
+
+        assert "<|system|>" in result
+        assert "<|user|>" in result
+        assert "Test question?" in result
+        assert "Context information." in result
+
+    @pytest.mark.unit
+    def test_rag_chat_template_requires_all_variables(self) -> None:
+        """Verify RAG_CHAT_TEMPLATE requires all input variables.
+
+        Given:
+            RAG_CHAT_TEMPLATE missing required variables.
+        When:
+            Attempting to render.
+        Then:
+            ConfigError is raised for missing variables.
+        """
+        from ragmark.generation.prompts import RAG_CHAT_TEMPLATE
+
+        with pytest.raises(ConfigError, match="Missing required template variables"):
+            RAG_CHAT_TEMPLATE.render(context_chunks=["Test"])
