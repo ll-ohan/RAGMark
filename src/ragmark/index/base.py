@@ -17,38 +17,42 @@ from ragmark.schemas.retrieval import SearchResult
 class VectorIndex(ABC):
     """Abstract base class for vector index backends.
 
-    This class defines the contract for all vector database implementations,
-    providing a consistent async interface for CRUD operations and search.
+    Defines the contract for vector database implementations, providing a
+    consistent async interface for CRUD operations and search.
 
-    All I/O operations are async to support efficient concurrent processing
-    and non-blocking database interactions.
+    Attributes:
+        config: Index configuration.
+        embedder: Optional embedder instance.
     """
+
+    config: IndexConfig | None
+    embedder: BaseEmbedder | None
 
     @classmethod
     @abstractmethod
     def from_config(
         cls, config: IndexConfig, embedder: BaseEmbedder | None = None
     ) -> "VectorIndex":
-        """Instantiate the index from a configuration object.
+        """Instantiate index from configuration.
 
         Args:
-            config: The index configuration.
-            embedder: Optional embedder instance.
+            config: Index configuration.
+            embedder: Embedder instance.
 
         Returns:
-            An instance of the specific VectorIndex subclass.
+            Instance of specific VectorIndex subclass.
         """
         pass
 
     @abstractmethod
     async def add(self, nodes: list[KnowledgeNode]) -> None:
-        """Add knowledge nodes to the index.
+        """Add knowledge nodes to index.
 
-        Nodes with missing embeddings (dense_vector=None) should trigger
-        an error unless the index has an associated embedder configured.
+        Nodes with missing embeddings (dense_vector=None) must trigger an error
+        unless the index has an associated embedder configured.
 
         Args:
-            nodes: Knowledge nodes to index.
+            nodes: Nodes to index.
 
         Raises:
             IndexError: If insertion fails.
@@ -59,19 +63,19 @@ class VectorIndex(ABC):
     @abstractmethod
     async def search(
         self,
-        query_vector: list[float] | dict[int, float],
+        query_vector: list[float] | dict[str, list[int] | list[float]],
         top_k: int = 10,
         filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         """Search for similar vectors using dense embeddings.
 
         Args:
-            query_vector: Dense query embedding vector or sparse vector.
+            query_vector: Dense query embedding or sparse vector.
             top_k: Number of results to return.
-            filters: Optional metadata filters (backend-specific syntax).
+            filters: Metadata filters (backend-specific syntax).
 
         Returns:
-            List of search results ordered by descending similarity.
+            Search results ordered by descending similarity.
 
         Raises:
             IndexError: If search fails.
@@ -86,9 +90,9 @@ class VectorIndex(ABC):
         top_k: int,
         alpha: float,
     ) -> list[SearchResult]:
-        """Search using hybrid dense + sparse retrieval.
+        """Perform hybrid dense and sparse retrieval.
 
-        The alpha parameter controls the fusion weight:
+        Alpha parameter controls the fusion weight:
         - alpha=0.0: sparse only
         - alpha=1.0: dense only
         - alpha=0.5: equal weight
@@ -100,7 +104,7 @@ class VectorIndex(ABC):
             alpha: Fusion weight for dense vs sparse (0.0 to 1.0).
 
         Returns:
-            List of search results with fused scores.
+            Search results with fused scores.
 
         Raises:
             IndexError: If search fails.
@@ -110,13 +114,13 @@ class VectorIndex(ABC):
 
     @abstractmethod
     async def delete(self, node_ids: list[str]) -> int:
-        """Delete nodes from the index by ID.
+        """Delete nodes by ID.
 
         Args:
-            node_ids: List of node IDs to delete.
+            node_ids: Node IDs to delete.
 
         Returns:
-            Number of nodes actually deleted.
+            Count of deleted nodes.
 
         Raises:
             IndexError: If deletion fails.
@@ -125,10 +129,10 @@ class VectorIndex(ABC):
 
     @abstractmethod
     async def count(self) -> int:
-        """Get the total number of indexed nodes.
+        """Get total number of indexed nodes.
 
         Returns:
-            Total count of nodes in the index.
+            Node count.
 
         Raises:
             IndexError: If count operation fails.
@@ -137,7 +141,7 @@ class VectorIndex(ABC):
 
     @abstractmethod
     async def clear(self) -> None:
-        """Delete all nodes from the index.
+        """Delete all nodes from index.
 
         This operation is typically faster than deleting nodes individually.
 
@@ -148,13 +152,13 @@ class VectorIndex(ABC):
 
     @abstractmethod
     async def exists(self, node_id: str) -> bool:
-        """Check if a node exists in the index.
+        """Check if node exists in index.
 
         Args:
             node_id: Node ID to check.
 
         Returns:
-            True if the node exists in the index.
+            True if node exists.
 
         Raises:
             IndexError: If existence check fails.
@@ -162,10 +166,10 @@ class VectorIndex(ABC):
         pass
 
     async def __aenter__(self) -> "VectorIndex":
-        """Async context manager entry.
+        """Enter async context manager.
 
         Returns:
-            Self for use in async with statements.
+            Instance for context.
         """
         return self
 
@@ -176,8 +180,5 @@ class VectorIndex(ABC):
         _exc_val: BaseException | None,
         _exc_tb: Any,
     ) -> None:
-        """Async context manager exit.
-
-        Implementations should clean up connections and resources here.
-        """
+        """Exit async context manager."""
         pass

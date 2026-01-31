@@ -4,7 +4,6 @@ This module provides the ForgeRunner class which chains ingestion
 and fragmentation into a single streaming pipeline.
 """
 
-import logging
 import time
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -13,9 +12,10 @@ from ragmark.config.profile import ExperimentProfile
 from ragmark.forge.factory import FragmenterFactory, IngestorFactory
 from ragmark.forge.fragmenters import BaseFragmenter
 from ragmark.forge.ingestors import BaseIngestor
+from ragmark.logger import get_logger
 from ragmark.schemas.documents import KnowledgeNode
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ForgeRunner:
@@ -80,7 +80,7 @@ class ForgeRunner:
         small to medium document sets.
 
         Args:
-            sources: List of source file paths.
+            sources: The source file paths.
 
         Returns:
             List of all generated knowledge nodes.
@@ -97,8 +97,12 @@ class ForgeRunner:
         This method uses generators throughout the pipeline, yielding
         nodes as they are created without loading everything into memory.
 
+        The error handling respects fail_fast:
+        - If fail_fast=True: Raises on first error
+        - If fail_fast=False: Logs warning and continues with next file
+
         Args:
-            sources: Iterable of source file paths.
+            sources: The source file paths.
 
         Yields:
             KnowledgeNode instances as they are created.
@@ -107,36 +111,72 @@ class ForgeRunner:
             IngestionError: If ingestion fails (when fail_fast=True).
             FragmentationError: If fragmentation fails (when fail_fast=True).
         """
+        from ragmark.exceptions import FragmentationError, IngestionError
+
         start_time = time.time()
-        doc_count: int | str = 0
+        doc_count = 0
         node_count = 0
+        error_count = 0
 
         logger.info("Starting Forge pipeline")
 
-        try:
-            # Chain ingestion and fragmentation
-            docs = self.ingestor.ingest_batch(sources)
-            nodes = self.fragmenter.fragment_batch(docs)
+        for i, source in enumerate(sources):
+            # Audit Spec: Log every 10 documents to avoid flooding
+            if i % 10 == 0:
+                logger.debug(
+                    "Processing progress: documents=%d, success=%d, nodes=%d",
+                    i,
+                    doc_count,
+                    node_count,
+                )
 
-            for node in nodes:
-                yield node
-                node_count += 1
+            try:
+                logger.debug("Ingesting document: source=%s", source)
+                doc = self.ingestor.ingest(source)
+                doc_count += 1
 
-                # Track document transitions (approximate)
-                if node_count % 100 == 0:
-                    logger.debug(f"Processed {node_count} nodes so far")
+                logger.debug("Fragmenting document: source=%s", source)
+                nodes = self.fragmenter.fragment(doc)
 
-            doc_count = len(list(sources)) if isinstance(sources, list) else "unknown"
+                for node in nodes:
+                    yield node
+                    node_count += 1
 
-        except Exception as e:
-            if self.fail_fast:
-                logger.error(f"Forge pipeline failed: {e}")
-                raise
-            else:
-                logger.warning(f"Skipping failed document: {e}")
+            except (IngestionError, FragmentationError) as e:
+                error_count += 1
+                if self.fail_fast:
+                    logger.error(
+                        "Forge pipeline failed: source=%s, error=%s", source, e
+                    )
+                    logger.debug("Pipeline failure details: %s", e, exc_info=True)
+                    raise
+                else:
+                    logger.warning(
+                        "Skipping failed document: source=%s, error_type=%s",
+                        source,
+                        e.__class__.__name__,
+                    )
+                    logger.debug("Skip reason: %s", e, exc_info=True)
+                    continue
+
+            except Exception as e:
+                error_count += 1
+                if self.fail_fast:
+                    logger.error("Unexpected pipeline error: source=%s", source)
+                    logger.debug("Unexpected error details: %s", e, exc_info=True)
+                    raise
+                else:
+                    logger.warning(
+                        "Skipping document due to unexpected error: source=%s", source
+                    )
+                    logger.debug("Unexpected error details: %s", e, exc_info=True)
+                    continue
 
         duration = time.time() - start_time
         logger.info(
-            f"Forge pipeline complete: {doc_count} documents → {node_count} nodes "
-            f"in {duration:.2f}s"
+            "Forge pipeline complete: documents=%d, nodes=%d, duration=%.2fs, errors=%d",
+            doc_count,
+            node_count,
+            duration,
+            error_count,
         )

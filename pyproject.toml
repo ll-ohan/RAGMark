@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
     "pydantic>=2.0",
     "numpy>=1.24",
+    "scipy>=1.10",
     "pyyaml>=6.0",
     "tqdm>=4.65",
     "httpx>=0.24",
@@ -66,6 +67,7 @@ dev = [
     "types-PyYAML>=6.0",
     "types-tqdm>=4.65",
     "pre-commit>=3.5",
+    "reportlab>=4.4",
 ]
 all = [
     "ragmark[ingest,db,llm,embed,dev]",
@@ -118,7 +120,12 @@ pythonpath = ["src"]
 addopts = "--strict-markers -v"
 asyncio_mode = "auto"
 markers = [
+    "unit: marks pure logic tests without I/O (mocks allowed for network only)",
     "integration: marks tests requiring external infrastructure (Docker services)",
+    "slow: marks tests with heavy I/O or large data processing (excluded from pre-commit)",
+    "rag_edge_case: marks tests focusing on Unicode, null vectors, or NFC/NFD normalization",
+    "concurrency: marks tests for race conditions and concurrent access",
+    "gpu: marks tests requiring GPU acceleration (CUDA)",
 ]
 
 [tool.mypy]

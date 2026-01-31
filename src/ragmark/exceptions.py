@@ -148,8 +148,18 @@ class IndexError(RAGMarkError):
 class RetrievalError(RAGMarkError):
     """Raised when retrieval operations fail.
 
-    This includes embedding errors, search failures, reranking errors,
+    This includes search failures, reranking errors,
     or invalid retrieval configurations.
+    """
+
+    pass
+
+
+class EmbeddingError(RAGMarkError):
+    """Raised when embedding computation fails.
+
+    This includes model loading errors, encoding failures,
+    dimension mismatches, or batch processing errors.
     """
 
     pass
