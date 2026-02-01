@@ -37,6 +37,7 @@ class BaseLLMDriver(ABC):
         max_tokens: int,
         temperature: float = 0.7,
         stop: list[str] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> GenerationResult:
         """Generate text completion for a prompt.
 
@@ -45,6 +46,7 @@ class BaseLLMDriver(ABC):
             max_tokens: Generation length limit.
             temperature: Sampling randomness (0.0 = deterministic).
             stop: Sequences that halt generation when encountered.
+            response_format: Optional response format constraint (e.g., JSON schema).
 
         Returns:
             Completion text, token usage statistics, and finish reason.
@@ -262,6 +264,7 @@ class LlamaCppDriver(BaseLLMDriver):
         max_tokens: int,
         temperature: float = 0.7,
         stop: list[str] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> GenerationResult:
         """Generate text completion for a prompt.
 
@@ -270,6 +273,9 @@ class LlamaCppDriver(BaseLLMDriver):
             max_tokens: Generation length limit.
             temperature: Sampling randomness (0.0 = deterministic).
             stop: Sequences that halt generation when encountered.
+            response_format: Optional response format constraint.
+                Use {"type": "json_object"} for JSON output.
+                Use {"type": "json_schema", "schema": {...}} for schema-constrained JSON.
 
         Returns:
             Completion text, token usage statistics, and finish reason.
@@ -281,24 +287,29 @@ class LlamaCppDriver(BaseLLMDriver):
             raise GenerationError("Model not loaded. Use async with context manager.")
 
         logger.debug(
-            "Generation started: prompt_chars=%d, max_tokens=%d, temperature=%.2f",
+            "Generation started: prompt_chars=%d, max_tokens=%d, temperature=%.2f, response_format=%s",
             len(prompt),
             max_tokens,
             temperature,
+            response_format,
         )
 
         loop = asyncio.get_running_loop()
 
         try:
+            kwargs = {
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stop": stop or [],
+                "echo": False,
+            }
+
+            if response_format is not None:
+                kwargs["response_format"] = response_format
+
             output = await loop.run_in_executor(
                 self._executor,
-                lambda: self._model(
-                    prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    stop=stop or [],
-                    echo=False,
-                ),
+                lambda: self._model(prompt, **kwargs),
             )
         except Exception as e:
             logger.error("Generation failed: prompt_chars=%d", len(prompt))

@@ -466,6 +466,72 @@ def trace_factory(sample_knowledge_node: KnowledgeNode) -> Callable[..., TraceCo
     return _make_trace
 
 
+@pytest.fixture
+def enriched_node_factory() -> Callable[..., KnowledgeNode]:
+    """Factory to create enriched KnowledgeNode with synthetic QA metadata.
+
+    Returns:
+        A callable that generates enriched nodes with QA pairs.
+    """
+
+    def _make_enriched_node(
+        content: str,
+        source_id: str,
+        num_qa_pairs: int = 2,
+    ) -> KnowledgeNode:
+        qa_pairs = []
+        for i in range(num_qa_pairs):
+            qa_pairs.append(
+                {
+                    "question": f"Question {i+1} about {source_id}?",
+                    "answer": f"Answer {i+1}: {content[:50]}",
+                    "confidence": 0.9,
+                }
+            )
+
+        metadata = {
+            "synthetic_qa": {
+                "qa_pairs": qa_pairs,
+                "generated_at": "2024-01-01T00:00:00Z",
+                "model": "test-model",
+                "num_questions_requested": num_qa_pairs,
+                "num_questions_validated": num_qa_pairs,
+                "batch_id": "test_batch",
+            },
+            "custom_field": "custom_value",
+        }
+
+        return KnowledgeNode(
+            content=content,
+            source_id=source_id,
+            position=NodePosition(start_char=0, end_char=len(content)),
+            metadata=metadata,
+        )
+
+    return _make_enriched_node
+
+
+@pytest.fixture
+def test_node_factory() -> Callable[..., KnowledgeNode]:
+    """Factory to create test KnowledgeNode instances.
+
+    Returns:
+        A callable that generates test nodes with minimal valid data.
+    """
+
+    def _make_test_node(
+        content: str,
+        source_id: str = "test",
+    ) -> KnowledgeNode:
+        return KnowledgeNode(
+            content=content,
+            source_id=source_id,
+            position=NodePosition(start_char=0, end_char=len(content)),
+        )
+
+    return _make_test_node
+
+
 # Test helpers for assertion patterns
 
 

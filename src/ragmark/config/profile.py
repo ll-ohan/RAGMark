@@ -281,6 +281,77 @@ class GeneratorConfig(BaseModel):
     )
 
 
+class QuestionGeneratorConfig(BaseModel):
+    """Configuration for synthetic QA generation.
+
+    Attributes:
+        enabled: Enable QA generation.
+        backend: Generation backend.
+        model_path: Path to LLM model.
+        num_questions: QA pairs per chunk.
+        batch_size: Nodes per LLM call.
+        temperature: Sampling temperature.
+        max_tokens: Maximum tokens for generation.
+        context_window: Model context window.
+        n_gpu_layers: GPU layers for acceleration.
+        validation: Enable QA validation.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable synthetic QA generation",
+    )
+    backend: Literal["llm"] = Field(
+        default="llm",
+        description="Question generation backend",
+    )
+    model_path: Path = Field(
+        ...,
+        description="Path to LLM model (GGUF format)",
+    )
+    num_questions: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of QA pairs per chunk",
+    )
+    batch_size: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        description="Nodes per LLM batch call",
+    )
+    temperature: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature",
+    )
+    max_tokens: int = Field(
+        default=512,
+        ge=128,
+        le=2048,
+        description="Maximum tokens for generation",
+    )
+    context_window: int = Field(
+        default=4096,
+        ge=512,
+        le=32768,
+        description="Model context window size",
+    )
+    n_gpu_layers: int = Field(
+        default=0,
+        ge=0,
+        description="Number of GPU layers (0=CPU only)",
+    )
+    validation: bool = Field(
+        default=True,
+        description="Enable QA validation",
+    )
+
+
 class EvaluationConfig(BaseModel):
     """Configuration for evaluation.
 
@@ -386,6 +457,7 @@ class ExperimentProfile(BaseModel):
         index: Vector index configuration.
         retrieval: Retrieval configuration.
         generator: LLM generation configuration.
+        question_generator: Synthetic QA generation configuration.
         evaluation: Evaluation configuration.
         metrics: Metrics collection configuration.
     """
@@ -419,6 +491,10 @@ class ExperimentProfile(BaseModel):
     generator: GeneratorConfig | None = Field(
         default=None,
         description="LLM generation configuration",
+    )
+    question_generator: QuestionGeneratorConfig | None = Field(
+        default=None,
+        description="Optional synthetic QA generation configuration",
     )
     evaluation: EvaluationConfig | None = Field(
         default=None,

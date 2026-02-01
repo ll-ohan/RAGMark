@@ -291,3 +291,41 @@ Context:
 """,
     input_variables=["context_chunks", "chat_history", "user_question"],
 )
+
+SYNTHETIC_QA_BATCH_TEMPLATE = PromptTemplate(
+    template="""You are an expert at creating question-answer pairs for text evaluation.
+
+For each text chunk below, generate {{ num_questions }} question-answer pairs.
+
+CRITICAL RULES:
+1. Questions must be answerable using ONLY the information in that specific chunk
+2. Answers must be concise and directly based on chunk content
+3. Vary question types (factual, conceptual, analytical)
+4. Each question must end with '?'
+
+{% for node in nodes %}
+=== CHUNK {{ loop.index }} (ID: {{ node.node_id }}) ===
+{{ node.content }}
+
+{% endfor %}
+
+Generate a JSON response with the following structure:
+- "chunks": array of objects, one per chunk
+- Each chunk object has "chunk_id" (starting from 1) and "qa_pairs"
+- Each QA pair has "question" and "answer" fields
+
+Example structure:
+{
+  "chunks": [
+    {
+      "chunk_id": 1,
+      "qa_pairs": [
+        {"question": "What is the main topic?", "answer": "The main topic is..."},
+        {"question": "How does X relate to Y?", "answer": "X relates to Y by..."}
+      ]
+    }
+  ]
+}
+""",
+    input_variables=["nodes", "num_questions"],
+)

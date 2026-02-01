@@ -12,10 +12,15 @@ from pathlib import Path
 from typing import Any
 
 from ragmark.config.profile import ExperimentProfile, StreamingMetricsConfig
-from ragmark.forge.factory import FragmenterFactory, IngestorFactory
+from ragmark.forge.factory import (
+    FragmenterFactory,
+    IngestorFactory,
+    QuestionGeneratorFactory,
+)
 from ragmark.forge.fragmenters import BaseFragmenter
 from ragmark.forge.ingestors import BaseIngestor
 from ragmark.forge.metrics import BaseMetricsCollector
+from ragmark.forge.question_generator import BaseQuestionGenerator
 from ragmark.logger import get_logger
 from ragmark.schemas.documents import KnowledgeNode
 
@@ -33,6 +38,7 @@ class ForgeRunner:
         ingestor: Document ingestion backend.
         fragmenter: Text fragmentation strategy.
         fail_fast: If True, stop on first error. If False, skip failed documents.
+        question_generator: Optional synthetic QA generator.
     """
 
     def __init__(
@@ -41,6 +47,7 @@ class ForgeRunner:
         fragmenter: BaseFragmenter,
         fail_fast: bool = True,
         profile: ExperimentProfile | None = None,
+        question_generator: BaseQuestionGenerator | None = None,
     ):
         """Initialize the forge runner.
 
@@ -49,11 +56,13 @@ class ForgeRunner:
             fragmenter: Fragmenter instance to use.
             fail_fast: Whether to stop on first error or continue.
             profile: Optional experiment profile for metrics configuration.
+            question_generator: Optional question generator for synthetic QA.
         """
         self.ingestor = ingestor
         self.fragmenter = fragmenter
         self.fail_fast = fail_fast
         self.profile = profile
+        self.question_generator = question_generator
 
     def _handle_document_error(
         self,
@@ -167,11 +176,22 @@ class ForgeRunner:
 
         fragmenter = FragmenterFactory.create(profile.fragmenter)
 
+        question_generator = None
+        if profile.question_generator and profile.question_generator.enabled:
+            logger.debug(
+                "Creating question generator: backend=%s",
+                profile.question_generator.backend,
+            )
+            question_generator = QuestionGeneratorFactory.create(
+                profile.question_generator
+            )
+
         return cls(
             ingestor=ingestor,
             fragmenter=fragmenter,
             fail_fast=profile.fail_fast,
             profile=profile,
+            question_generator=question_generator,
         )
 
     def process(self, sources: list[Path]) -> list[KnowledgeNode]:
@@ -250,61 +270,105 @@ class ForgeRunner:
         """Process documents with async streaming (O(1) memory, non-blocking I/O).
 
         Uses asyncio.to_thread for I/O-bound ingestion to prevent event loop blocking.
+        Optionally enriches nodes with synthetic QA pairs if question_generator is configured.
 
         Args:
             sources: Source file paths as async or sync iterable.
 
         Yields:
-            Knowledge nodes as generated.
+            Knowledge nodes as generated, optionally enriched with synthetic QA.
 
         Raises:
             IngestionError: If ingestion fails (when fail_fast=True).
             FragmentationError: If fragmentation fails (when fail_fast=True).
+            QuestionGenerationError: If QA generation fails (when fail_fast=True).
         """
-        from ragmark.exceptions import FragmentationError, IngestionError
+        from ragmark.exceptions import (
+            FragmentationError,
+            IngestionError,
+            QuestionGenerationError,
+        )
 
         start_time = time.time()
         doc_count = 0
         node_count = 0
+        qa_enriched_count = 0
         error_count = 0
 
-        logger.info("Starting async Forge pipeline")
+        logger.info(
+            "Starting async Forge pipeline with QA generation=%s",
+            bool(self.question_generator),
+        )
 
         source_iter = self._to_async_iter(sources)
 
-        i = 0
-        async for source in source_iter:
-            self._log_progress(i, doc_count, node_count)
+        async def node_stream() -> AsyncIterator[KnowledgeNode]:
+            """Create node stream from ingestion and fragmentation."""
+            nonlocal doc_count, error_count
+            i = 0
+            async for source in source_iter:
+                self._log_progress(i, doc_count, node_count)
+
+                try:
+                    logger.debug("Ingesting document: source=%s", source)
+
+                    doc = await asyncio.to_thread(self.ingestor.ingest, source)
+                    doc_count += 1
+
+                    logger.debug("Fragmenting document: source=%s", source)
+
+                    for node in self.fragmenter.fragment_lazy(doc):
+                        yield node
+
+                except (IngestionError, FragmentationError) as e:
+                    error_count += 1
+                    self._handle_document_error(source, e, is_expected=True)
+                    if self.fail_fast:
+                        raise
+
+                except Exception as e:
+                    error_count += 1
+                    self._handle_document_error(source, e, is_expected=False)
+                    if self.fail_fast:
+                        raise
+
+                i += 1
+
+        if self.question_generator:
+            batch_size = getattr(self.question_generator, "_batch_size", 4)
+            logger.debug("Applying QA generation: batch_size=%d", batch_size)
 
             try:
-                logger.debug("Ingesting document: source=%s", source)
+                enriched_stream = self.question_generator.generate_stream_async(
+                    node_stream(), batch_size=batch_size
+                )
 
-                # Async ingestion prevents event loop blocking
-                doc = await asyncio.to_thread(self.ingestor.ingest, source)
-                doc_count += 1
-
-                logger.debug("Fragmenting document: source=%s", source)
-
-                # Fragmentation is CPU-bound but fast
-                for node in self.fragmenter.fragment_lazy(doc):
-                    yield node
+                async for enriched_node in enriched_stream:
+                    if "synthetic_qa" in enriched_node.metadata:
+                        qa_enriched_count += 1
+                    yield enriched_node
                     node_count += 1
 
-            except (IngestionError, FragmentationError) as e:
+            except QuestionGenerationError as e:
                 error_count += 1
-                self._handle_document_error(source, e, is_expected=True)
-                if not self.fail_fast:
-                    continue
+                logger.error("QA generation failed in pipeline: %s", e.message)
+                logger.debug("QA generation error details: %s", e, exc_info=True)
+                if self.fail_fast:
+                    raise
+        else:
+            async for node in node_stream():
+                yield node
+                node_count += 1
 
-            except Exception as e:
-                error_count += 1
-                self._handle_document_error(source, e, is_expected=False)
-                if not self.fail_fast:
-                    continue
-
-            i += 1
-
-        self._log_completion(start_time, doc_count, node_count, error_count, "async")
+        logger.info(
+            "Async Forge pipeline complete: documents=%d, nodes=%d, qa_enriched=%d, "
+            "duration=%.2fs, errors=%d",
+            doc_count,
+            node_count,
+            qa_enriched_count,
+            time.time() - start_time,
+            error_count,
+        )
 
     async def process_concurrent(
         self, sources: Iterable[Path], max_concurrency: int = 4
@@ -414,11 +478,11 @@ class ForgeRunner:
                 if isinstance(item, Exception):
                     if self.fail_fast:
                         raise item
-                    else:
-                        continue
+                    # When not failing fast, we yield the error to the caller.
+                    # We don't increment node_count for errors.
                 else:
-                    yield item
                     node_count += 1
+                    yield item
 
         self._log_completion(
             start_time, doc_count, node_count, error_count, "concurrent"

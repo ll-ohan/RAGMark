@@ -4,16 +4,22 @@ This module provides factory functions for creating ingestor and fragmenter
 instances from configuration objects.
 """
 
-from ragmark.config.profile import FragmenterConfig, IngestorConfig
+from ragmark.config.profile import (
+    FragmenterConfig,
+    IngestorConfig,
+    QuestionGeneratorConfig,
+)
 from ragmark.exceptions import UnsupportedBackendError
 from ragmark.forge.fragmenters import BaseFragmenter
 from ragmark.forge.ingestors import BaseIngestor
+from ragmark.forge.question_generator import BaseQuestionGenerator
 from ragmark.logger import get_logger
 
 logger = get_logger(__name__)
 
 _INGESTOR_REGISTRY: dict[str, type[BaseIngestor]] = {}
 _FRAGMENTER_REGISTRY: dict[str, type[BaseFragmenter]] = {}
+_QUESTION_GENERATOR_REGISTRY: dict[str, type[BaseQuestionGenerator]] = {}
 
 
 def register_ingestor(name: str, cls: type[BaseIngestor]) -> None:
@@ -40,6 +46,19 @@ def register_fragmenter(name: str, cls: type[BaseFragmenter]) -> None:
     """
     _FRAGMENTER_REGISTRY[name] = cls
     logger.debug("Registered fragmenter strategy: %s", name)
+
+
+def register_question_generator(name: str, cls: type[BaseQuestionGenerator]) -> None:
+    """Register a custom question generator backend.
+
+    Enables adding custom implementations without modifying the core library.
+
+    Args:
+        name: Unique backend identifier.
+        cls: Implementation class.
+    """
+    _QUESTION_GENERATOR_REGISTRY[name] = cls
+    logger.debug("Registered question generator backend: %s", name)
 
 
 class IngestorFactory:
@@ -123,3 +142,36 @@ class FragmenterFactory:
             )
         else:
             raise ValueError(f"Unknown fragmentation strategy: {strategy}")
+
+
+class QuestionGeneratorFactory:
+    """Factory for creating question generator instances."""
+
+    @staticmethod
+    def create(config: QuestionGeneratorConfig) -> BaseQuestionGenerator:
+        """Instantiate a question generator based on the provided configuration.
+
+        Args:
+            config: Question generator configuration.
+
+        Returns:
+            Configured question generator instance.
+
+        Raises:
+            ValueError: If backend is unknown.
+        """
+        backend = config.backend
+
+        if backend in _QUESTION_GENERATOR_REGISTRY:
+            return _QUESTION_GENERATOR_REGISTRY[backend].from_config(config)
+
+        if backend == "llm":
+            from ragmark.forge.question_generator import LLMQuestionGenerator
+
+            return LLMQuestionGenerator.from_config(config)
+        else:
+            supported = list(_QUESTION_GENERATOR_REGISTRY.keys()) + ["llm"]
+            raise ValueError(
+                f"Unknown question generator backend: {backend}. "
+                f"Supported: {supported}"
+            )
