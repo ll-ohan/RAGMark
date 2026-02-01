@@ -5,6 +5,8 @@ truncate_end, truncate_middle). Uses a fake driver implementation per
 TEST_POLICY.md Section 2.3 to avoid heavy tokenizer dependencies.
 """
 
+import time
+
 import pytest
 
 from ragmark.generation.context import ContextManager
@@ -508,3 +510,67 @@ class TestContextManagerEdgeCases:
 
         assert len(prompt) > 0
         assert "Chunk 1" in prompt or "Chunk 2" in prompt
+
+
+@pytest.mark.unit
+@pytest.mark.benchmark
+class TestContextTruncateMiddlePerformance:
+    """Benchmark tests for Context._truncate_middle() deque optimization."""
+
+    def test_truncate_middle_1000_chunks_should_complete_under_5ms(self) -> None:
+        """Verifies _truncate_middle() achieves O(n) performance via deque optimization.
+
+        Given:
+            A context manager with 1000 chunks to truncate.
+        When:
+            Applying truncate_middle strategy with tight token budget.
+        Then:
+            Operation completes in under 5ms (40x faster than O(n²)), and
+            first/last chunks are preserved per truncate_middle semantics.
+        """
+        driver = FakeLLMDriver(context_window=1000)
+        manager = ContextManager(driver, strategy="truncate_middle")
+        chunks = [f"Chunk {i} with some content here" for i in range(1000)]
+
+        start = time.perf_counter()
+        selected = manager.fit_context(
+            system="System",
+            context_chunks=chunks,
+            user_query="Query",
+            max_completion=100,
+        )
+        duration_ms = (time.perf_counter() - start) * 1000
+
+        assert "Chunk 0" in selected
+        assert "Chunk 999" in selected
+        assert duration_ms < 5, f"Truncate took {duration_ms:.2f}ms, expected <5ms"
+
+    def test_truncate_middle_should_preserve_ordering_of_first_and_last_chunks(
+        self,
+    ) -> None:
+        """Verifies truncate_middle preserves chunk ordering for first and last halves.
+
+        Given:
+            Context manager with 20 identifiable chunks exceeding budget.
+        When:
+            Applying truncate_middle strategy.
+        Then:
+            First chunks appear in original order, last chunks appear in
+            original order, and middle chunks are omitted to fit budget.
+        """
+        driver = FakeLLMDriver(context_window=100)
+        manager = ContextManager(driver, strategy="truncate_middle")
+        chunks = [f"Item_{i:02d}" for i in range(20)]
+
+        selected = manager.fit_context(
+            system="S",
+            context_chunks=chunks,
+            user_query="Q",
+            max_completion=20,
+        )
+
+        first_idx = selected.find("Item_00")
+        last_idx = selected.find("Item_19")
+        assert first_idx != -1
+        assert last_idx != -1
+        assert first_idx < last_idx

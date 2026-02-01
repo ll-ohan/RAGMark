@@ -100,7 +100,7 @@ class TestTokenFragmenter:
         """
         Given a source text in NFD (decomposed) form.
         When the tokenizer 'decodes' strictly to NFC (composed), creating a length mismatch.
-        Then the drift logic (lines 225-238) must activate to find the correct semantic end.
+        Then the drift correction logic must activate to find the correct semantic end.
 
         Note: Real tiktoken is usually reversible. We use a Fake to FORCE the drift path.
         """
@@ -220,3 +220,83 @@ class TestTokenFragmenter:
             FragmentationError, match="Document tokenization produced no tokens"
         ):
             TokenFragmenter().fragment(doc)
+
+    def test_fragment_lazy_yields_progressively(
+        self, doc_factory: Callable[..., SourceDoc]
+    ) -> None:
+        """
+        Given a document that produces multiple chunks.
+        When processed with fragment_lazy.
+        Then it should yield nodes one at a time, not materialize all at once.
+        """
+        content = "The quick brown fox jumps over the lazy dog." * 20
+        doc = doc_factory(content=content, source_id="progressive")
+
+        fragmenter = TokenFragmenter(chunk_size=10, overlap=2)
+        generator = fragmenter.fragment_lazy(doc)
+
+        assert hasattr(generator, "__iter__")
+        assert hasattr(generator, "__next__")
+
+        nodes = list(generator)
+        assert len(nodes) > 1
+
+        nodes_from_fragment = fragmenter.fragment(doc)
+        assert len(nodes) == len(nodes_from_fragment)
+
+        for lazy_node, list_node in zip(nodes, nodes_from_fragment, strict=True):
+            assert lazy_node.content == list_node.content
+            assert lazy_node.position.start_char == list_node.position.start_char
+            assert lazy_node.position.end_char == list_node.position.end_char
+
+    def test_fragment_lazy_equivalence_with_fragment(
+        self, doc_factory: Callable[..., SourceDoc]
+    ) -> None:
+        """
+        Given a standard document.
+        When processing with both fragment() and fragment_lazy().
+        Then both methods must produce identical results in content, metadata, and positions.
+        """
+        content = "Lorem ipsum dolor sit amet, consectetur adipiscing elit." * 30
+        doc = doc_factory(content=content, source_id="equiv")
+
+        fragmenter = TokenFragmenter(chunk_size=20, overlap=5)
+
+        lazy_nodes = list(fragmenter.fragment_lazy(doc))
+        list_nodes = fragmenter.fragment(doc)
+
+        assert len(lazy_nodes) == len(list_nodes)
+
+        for lazy, listed in zip(lazy_nodes, list_nodes, strict=True):
+            assert lazy.content == listed.content
+            assert lazy.source_id == listed.source_id
+            assert lazy.position.start_char == listed.position.start_char
+            assert lazy.position.end_char == listed.position.end_char
+            assert lazy.metadata["token_count"] == listed.metadata["token_count"]
+            assert lazy.metadata["chunk_index"] == listed.metadata["chunk_index"]
+
+    @pytest.mark.rag_edge_case
+    def test_fragment_lazy_handles_unicode_normalization_drift(
+        self, doc_factory: Callable[..., SourceDoc]
+    ) -> None:
+        """
+        Given text with combining characters that may cause normalization drift.
+        When processed with fragment_lazy.
+        Then content must be preserved exactly, matching fragment() behavior.
+        """
+        text = "caf" + "e\u0301" + " " + "A" + "\u0300" * 10 + " test"
+        doc = doc_factory(content=text, source_id="drift")
+
+        fragmenter = TokenFragmenter(chunk_size=5, overlap=0)
+
+        lazy_nodes = list(fragmenter.fragment_lazy(doc))
+        list_nodes = fragmenter.fragment(doc)
+
+        assert len(lazy_nodes) == len(list_nodes)
+
+        lazy_reconstructed = "".join(n.content for n in lazy_nodes)
+        list_reconstructed = "".join(n.content for n in list_nodes)
+
+        assert lazy_reconstructed == text
+        assert list_reconstructed == text
+        assert lazy_reconstructed == list_reconstructed

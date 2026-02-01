@@ -98,6 +98,7 @@ class EmbedderConfig(BaseModel):
         model_name: HuggingFace model identifier or local path.
         device: Device to use for inference (cpu, cuda, mps).
         batch_size: Batch size for embedding computation.
+        rate_limit: Maximum requests per second (None for unlimited).
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -114,6 +115,11 @@ class EmbedderConfig(BaseModel):
         default=32,
         ge=1,
         description="Batch size for embedding computation",
+    )
+    rate_limit: float | None = Field(
+        default=None,
+        ge=0.1,
+        description="Maximum requests per second (None for unlimited)",
     )
 
 
@@ -316,6 +322,57 @@ class EvaluationConfig(BaseModel):
     )
 
 
+class StreamingMetricsConfig(BaseModel):
+    """Configuration for streaming pipeline metrics.
+
+    Attributes:
+        enabled: Whether to enable metrics collection.
+        interval: Sampling interval in seconds.
+        max_samples: Memory limit for retained samples.
+        backpressure_threshold: Queue fill ratio triggering warnings.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable streaming metrics collection",
+    )
+    interval: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=60.0,
+        description="Sampling interval in seconds",
+    )
+    max_samples: int = Field(
+        default=10000,
+        ge=10,
+        le=100000,
+        description="Maximum samples to retain (memory bound)",
+    )
+    backpressure_threshold: float = Field(
+        default=0.8,
+        ge=0.5,
+        le=1.0,
+        description="Queue fill ratio to trigger warnings",
+    )
+
+
+class MetricsConfig(BaseModel):
+    """Configuration for metrics collection.
+
+    Attributes:
+        streaming: Streaming pipeline metrics settings.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    streaming: StreamingMetricsConfig | None = Field(
+        default_factory=StreamingMetricsConfig,
+        description="Streaming pipeline metrics configuration",
+    )
+
+
 class ExperimentProfile(BaseModel):
     """Complete experiment configuration profile.
 
@@ -330,6 +387,7 @@ class ExperimentProfile(BaseModel):
         retrieval: Retrieval configuration.
         generator: LLM generation configuration.
         evaluation: Evaluation configuration.
+        metrics: Metrics collection configuration.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -365,6 +423,10 @@ class ExperimentProfile(BaseModel):
     evaluation: EvaluationConfig | None = Field(
         default=None,
         description="Evaluation configuration",
+    )
+    metrics: MetricsConfig | None = Field(
+        default_factory=MetricsConfig,
+        description="Metrics collection configuration",
     )
 
     @classmethod

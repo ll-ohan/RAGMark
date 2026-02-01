@@ -80,3 +80,24 @@ class TraceContext(BaseModel):
         description="Metadata about the retrieval process (timing, strategy, etc.)",
     )
     reranked: bool = Field(False, description="Whether reranking was applied")
+
+
+class SearchCursor(BaseModel):
+    """Cursor for paginating search results.
+
+    Enables cursor-based pagination for large result sets, tracking
+    current position and page size for iterative retrieval.
+
+    Attributes:
+        offset: Current position in result set (0-indexed).
+        page_size: Number of results per page.
+        total_results: Total number of results available.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    offset: int = Field(default=0, ge=0, description="Current offset in results")
+    page_size: int = Field(default=10, ge=1, le=1000, description="Results per page")
+    total_results: int | None = Field(
+        default=None, ge=0, description="Total results available"
+    )

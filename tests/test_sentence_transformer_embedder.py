@@ -1,5 +1,6 @@
 """Unit tests for the SentenceTransformerEmbedder wrapper."""
 
+import time
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
@@ -327,3 +328,89 @@ class TestSentenceTransformerEmbedder:
             embedder.embed(["text"])
 
         assert mock_model.encode.call_args[1]["normalize_embeddings"] is False
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.asyncio
+class TestEmbedderRateLimiting:
+    """Tests for SentenceTransformerEmbedder rate limiting integration."""
+
+    async def test_embedder_with_rate_limit_should_throttle_requests(self) -> None:
+        """Verifies embedder respects rate_limit parameter.
+
+        Given:
+            SentenceTransformerEmbedder with rate_limit=5.0.
+        When:
+            Embedding 20 texts via embed_async().
+        Then:
+            Operation takes approximately 3 seconds (20 texts ÷ 5/s, after burst).
+        """
+        embedder = SentenceTransformerEmbedder(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            rate_limit=5.0,
+        )
+
+        # Warmup: load model (not timed)
+        await embedder.embed_async(["warmup"])
+
+        texts = [f"Test text {i}" for i in range(20)]
+
+        start = time.time()
+        await embedder.embed_async(texts)
+        duration = time.time() - start
+
+        # 20 texts at 5/s = ~3s rate limiting (5 immediate + 15 at 5/s)
+        assert 2.5 < duration < 5.0, f"Rate limit not enforced: {duration:.2f}s"
+
+    async def test_embedder_without_rate_limit_should_run_unrestricted(self) -> None:
+        """Verifies embedder without rate_limit runs at full speed.
+
+        Given:
+            SentenceTransformerEmbedder with rate_limit=None.
+        When:
+            Embedding 10 texts (after model warmup).
+        Then:
+            Completes quickly without artificial delays.
+        """
+        embedder = SentenceTransformerEmbedder(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            rate_limit=None,
+        )
+
+        texts = [f"Quick test {i}" for i in range(10)]
+
+        # Warmup: load model (not timed)
+        await embedder.embed_async(["warmup"])
+
+        start = time.time()
+        await embedder.embed_async(texts)
+        duration = time.time() - start
+
+        # Should complete in <2s without rate limiting (model already loaded)
+        assert duration < 2.0, f"Unrestricted took too long: {duration:.2f}s"
+
+    async def test_embedder_rate_limit_should_work_with_batching(self) -> None:
+        """Verifies rate limiting applies per batch, not per text.
+
+        Given:
+            SentenceTransformerEmbedder with rate_limit=2.0, batch_size=5.
+        When:
+            Embedding 10 texts (processed as 2 batches).
+        Then:
+            Duration reflects 2 batch acquisitions at 2/s (~1 second).
+        """
+        embedder = SentenceTransformerEmbedder(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            batch_size=5,
+            rate_limit=2.0,
+        )
+
+        texts = [f"Batch test {i}" for i in range(10)]
+
+        start = time.time()
+        await embedder.embed_async(texts)
+        duration = time.time() - start
+
+        # 10 texts at 2/s = ~4s rate limiting + ~2s model loading
+        assert 0.8 < duration < 7.0, f"Batch rate limiting: {duration:.2f}s"

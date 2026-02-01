@@ -16,10 +16,12 @@ install:
 	uv sync --all-extras
 
 test:
-	uv run pytest tests/ -m "not integration" -v
+	uv run pytest tests/ -m "not integration" -q --tb=line -v
 
 test-integration:
-	uv run pytest tests/ -m integration -v
+	uv run pytest tests/ -m integration -v --tb=line -q
+
+
 
 lint:
 	uv run ruff check src/ tests/

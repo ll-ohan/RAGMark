@@ -11,7 +11,7 @@ from typing import Any
 from ragmark.config.profile import IndexConfig
 from ragmark.index.embedders import BaseEmbedder
 from ragmark.schemas.documents import KnowledgeNode
-from ragmark.schemas.retrieval import SearchResult
+from ragmark.schemas.retrieval import SearchCursor, SearchResult
 
 
 class VectorIndex(ABC):
@@ -81,6 +81,51 @@ class VectorIndex(ABC):
             IndexError: If search fails.
         """
         pass
+
+    async def search_paginated(
+        self,
+        query_vector: list[float],
+        cursor: "SearchCursor",
+        filters: dict[str, Any] | None = None,
+    ) -> tuple[list["SearchResult"], "SearchCursor"]:
+        """Search with cursor-based pagination for large result sets.
+
+        Enables iterative retrieval of results beyond initial top_k limit,
+        useful for displaying paginated search results or processing large
+        result sets incrementally.
+
+        Args:
+            query_vector: Dense query embedding.
+            cursor: Pagination cursor with offset and page size.
+            filters: Metadata filters (backend-specific syntax).
+
+        Returns:
+            Tuple of (current page results, updated cursor with next offset).
+
+        Raises:
+            IndexError: If search fails.
+        """
+        # Default implementation: fetch all results up to offset+page_size
+        all_results = await self.search(
+            query_vector,
+            top_k=cursor.offset + cursor.page_size,
+            filters=filters,
+        )
+
+        page = all_results[cursor.offset : cursor.offset + cursor.page_size]
+
+        # Import here to avoid circular dependency
+        from ragmark.schemas.retrieval import SearchCursor
+
+        total_count = await self.count()
+
+        next_cursor = SearchCursor(
+            offset=cursor.offset + len(page),
+            page_size=cursor.page_size,
+            total_results=total_count,
+        )
+
+        return page, next_cursor
 
     @abstractmethod
     async def search_hybrid(

@@ -38,6 +38,7 @@ dependencies = [
     "tiktoken>=0.5",
     "langdetect>=1.0.9",
     "pandas>=2.3.3",
+    "aiofiles>=24.1.0",
 ]
 
 [project.optional-dependencies]
@@ -126,11 +127,12 @@ markers = [
     "rag_edge_case: marks tests focusing on Unicode, null vectors, or NFC/NFD normalization",
     "concurrency: marks tests for race conditions and concurrent access",
     "gpu: marks tests requiring GPU acceleration (CUDA)",
+    "benchmark: marks performance benchmark tests validating O(1) complexity and timing constraints",
 ]
 
 [tool.mypy]
 strict = true
-python_version = "3.10"
+python_version = "3.12"
 mypy_path = "src"
 packages = ["ragmark"]
 ignore_missing_imports = true
