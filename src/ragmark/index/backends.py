@@ -17,6 +17,7 @@ from ragmark.exceptions import IndexError
 from ragmark.index.base import VectorIndex
 from ragmark.index.embedders import BaseEmbedder
 from ragmark.logger import get_logger
+from ragmark.metrics.base import MonitoringMetric
 from ragmark.schemas.documents import KnowledgeNode
 from ragmark.schemas.retrieval import SearchResult
 
@@ -109,7 +110,11 @@ class MemoryIndex(VectorIndex):
             distance_metric=connection.get("distance_metric", "cosine"),
         )
 
-    async def add(self, nodes: list[KnowledgeNode]) -> None:
+    async def add(
+        self,
+        nodes: list[KnowledgeNode],
+        monitoring: MonitoringMetric | None = None,
+    ) -> None:
         """Add knowledge nodes to the index.
 
         If nodes lack embeddings and an embedder is configured, embeddings
@@ -117,94 +122,105 @@ class MemoryIndex(VectorIndex):
 
         Args:
             nodes: Knowledge nodes to add.
+            monitoring: Optional monitoring instance for timing.
 
         Raises:
             IndexError: If nodes lack embeddings and no embedder is configured,
                 or if vector dimensions don't match.
         """
-        if not nodes:
-            logger.debug("No nodes to add, skipping")
-            return
 
-        logger.debug("Adding nodes to index: count=%d", len(nodes))
+        async def _add_impl() -> None:
+            if not nodes:
+                logger.debug("No nodes to add, skipping")
+                return
 
-        vectors_to_add: list[list[float]] = []
-        needs_embedding = False
+            logger.debug("Adding nodes to index: count=%d", len(nodes))
 
-        for node in nodes:
-            if node.dense_vector is None:
-                needs_embedding = True
-                break
-            vectors_to_add.append(node.dense_vector)
+            vectors_to_add: list[list[float]] = []
+            needs_embedding = False
 
-        if needs_embedding:
-            if self.embedder is None:
-                logger.error("Nodes lack embeddings and no embedder configured")
-                raise IndexError(
-                    "Nodes must have dense_vector or embedder must be configured"
+            for node in nodes:
+                if node.dense_vector is None:
+                    needs_embedding = True
+                    break
+                vectors_to_add.append(node.dense_vector)
+
+            if needs_embedding:
+                if self.embedder is None:
+                    logger.error("Nodes lack embeddings and no embedder configured")
+                    raise IndexError(
+                        "Nodes must have dense_vector or embedder must be configured"
+                    )
+
+                logger.debug("Computing embeddings: count=%d", len(nodes))
+                texts = [node.content for node in nodes]
+                loop = asyncio.get_running_loop()
+                vectors_to_add = await loop.run_in_executor(
+                    None, self.embedder.embed, texts
+                )
+                logger.debug("Embeddings computed successfully")
+
+            for vec in vectors_to_add:
+                if len(vec) != self.embedding_dim:
+                    logger.error(
+                        "Vector dimension mismatch: expected=%d, got=%d",
+                        self.embedding_dim,
+                        len(vec),
+                    )
+                    raise IndexError(
+                        f"Vector dimension mismatch: expected {self.embedding_dim}, "
+                        f"got {len(vec)}"
+                    )
+
+            async with self._lock:
+                current_size = len(self._node_ids)
+                new_size = current_size + len(nodes)
+
+                logger.debug(
+                    "Resizing index: current=%d, new=%d", current_size, new_size
                 )
 
-            logger.debug("Computing embeddings: count=%d", len(nodes))
-            texts = [node.content for node in nodes]
-            loop = asyncio.get_running_loop()
-            vectors_to_add = await loop.run_in_executor(
-                None, self.embedder.embed, texts
+                new_vectors = np.zeros((new_size, self.embedding_dim), dtype=np.float32)
+                if current_size > 0:
+                    new_vectors[:current_size] = self._vectors
+                self._vectors = new_vectors
+
+                sparse_count = 0
+                for i, (node, vec) in enumerate(
+                    zip(nodes, vectors_to_add, strict=True)
+                ):
+                    idx = current_size + i
+                    self._vectors[idx] = vec
+                    self._node_ids.append(node.node_id)
+                    self._metadata.append(node.metadata)
+                    self._content.append(node.content)
+                    self._nodes.append(node)
+
+                    self._node_id_to_idx[node.node_id] = idx
+
+                    if node.sparse_vector:
+                        sparse_count += 1
+                        for token_id, weight in node.sparse_vector.items():
+                            if token_id not in self._inverted_index:
+                                self._inverted_index[token_id] = []
+                            self._inverted_index[token_id].append((idx, weight))
+
+            logger.info(
+                "Nodes added to index: count=%d, total=%d, sparse_vectors=%d",
+                len(nodes),
+                new_size,
+                sparse_count,
             )
-            logger.debug("Embeddings computed successfully")
 
-        for vec in vectors_to_add:
-            if len(vec) != self.embedding_dim:
-                logger.error(
-                    "Vector dimension mismatch: expected=%d, got=%d",
-                    self.embedding_dim,
-                    len(vec),
-                )
-                raise IndexError(
-                    f"Vector dimension mismatch: expected {self.embedding_dim}, "
-                    f"got {len(vec)}"
-                )
+            if self.max_nodes is not None and new_size > self.max_nodes:
+                excess = new_size - self.max_nodes
+                await self._evict_nodes(excess)
 
-        async with self._lock:
-            current_size = len(self._node_ids)
-            new_size = current_size + len(nodes)
-
-            logger.debug("Resizing index: current=%d, new=%d", current_size, new_size)
-
-            new_vectors = np.zeros((new_size, self.embedding_dim), dtype=np.float32)
-            if current_size > 0:
-                new_vectors[:current_size] = self._vectors
-            self._vectors = new_vectors
-
-            sparse_count = 0
-            for i, (node, vec) in enumerate(zip(nodes, vectors_to_add, strict=True)):
-                idx = current_size + i
-                self._vectors[idx] = vec
-                self._node_ids.append(node.node_id)
-                self._metadata.append(node.metadata)
-                self._content.append(node.content)
-                self._nodes.append(node)
-
-                # Maintain O(1) lookup mapping
-                self._node_id_to_idx[node.node_id] = idx
-
-                if node.sparse_vector:
-                    sparse_count += 1
-                    for token_id, weight in node.sparse_vector.items():
-                        if token_id not in self._inverted_index:
-                            self._inverted_index[token_id] = []
-                        self._inverted_index[token_id].append((idx, weight))
-
-        logger.info(
-            "Nodes added to index: count=%d, total=%d, sparse_vectors=%d",
-            len(nodes),
-            new_size,
-            sparse_count,
-        )
-
-        # Enforce max_nodes limit through eviction
-        if self.max_nodes is not None and new_size > self.max_nodes:
-            excess = new_size - self.max_nodes
-            await self._evict_nodes(excess)
+        if monitoring:
+            async with monitoring.stage("indexing"):
+                await _add_impl()
+        else:
+            await _add_impl()
 
     async def search(
         self,
@@ -266,7 +282,6 @@ class MemoryIndex(VectorIndex):
             top_k,
         )
 
-        # Update LRU access times for eviction policy
         if self.max_nodes is not None and search_results:
             import time
 
@@ -458,7 +473,7 @@ class MemoryIndex(VectorIndex):
         """
         async with self._lock:
             # Step 1: Collect valid indices using O(1) lookup
-            indices_to_delete = []
+            indices_to_delete: list[int] = []
             for node_id in node_ids:
                 idx = self._node_id_to_idx.get(node_id)
                 if idx is not None:
@@ -748,7 +763,6 @@ class MemoryIndex(VectorIndex):
 
 # These will raise ImportError if optional dependencies are not installed
 try:
-    from qdrant_client import QdrantClient  # noqa: F401
 
     class QdrantIndex(VectorIndex):
         """Qdrant vector index implementation.
@@ -806,7 +820,11 @@ try:
                 embedder=embedder,
             )
 
-        async def add(self, nodes: list[KnowledgeNode]) -> None:
+        async def add(
+            self,
+            nodes: list[KnowledgeNode],
+            monitoring: MonitoringMetric | None = None,
+        ) -> None:
             """Add knowledge nodes to index.
 
             Args:
@@ -906,7 +924,6 @@ except ImportError:
 
 
 try:
-    from pymilvus import MilvusClient  # noqa: F401
 
     class MilvusIndex(VectorIndex):
         """Milvus vector index implementation.
@@ -960,7 +977,11 @@ try:
                 embedder=embedder,
             )
 
-        async def add(self, nodes: list[KnowledgeNode]) -> None:
+        async def add(
+            self,
+            nodes: list[KnowledgeNode],
+            monitoring: MonitoringMetric | None = None,
+        ) -> None:
             """Add knowledge nodes to index.
 
             Args:
@@ -1060,7 +1081,6 @@ except ImportError:
 
 
 try:
-    import lancedb  # noqa: F401
 
     class LanceDBIndex(VectorIndex):
         """LanceDB vector index implementation.
@@ -1110,7 +1130,11 @@ try:
                 embedder=embedder,
             )
 
-        async def add(self, nodes: list[KnowledgeNode]) -> None:
+        async def add(
+            self,
+            nodes: list[KnowledgeNode],
+            monitoring: MonitoringMetric | None = None,
+        ) -> None:
             """Add knowledge nodes to index.
 
             Args:

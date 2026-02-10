@@ -2,7 +2,7 @@
 
 This script demonstrates how to:
 1. Load enriched knowledge nodes with synthetic QA metadata
-2. Convert them to TrialCase format
+2. Convert them to TrialCase format using adapters
 3. Export to JSONL or JSON for evaluation
 
 Usage:
@@ -11,7 +11,9 @@ Usage:
 
 from pathlib import Path
 
-from ragmark.forge.qa_exporter import QAExporter
+from ragmark.adapters.formats.json_adapter import JSONAdapter
+from ragmark.adapters.formats.jsonl_adapter import JSONLAdapter
+from ragmark.adapters.transformers.qa_adapter import NodeToTrialCaseAdapter
 from ragmark.schemas.documents import KnowledgeNode, NodePosition
 
 
@@ -29,7 +31,9 @@ def create_sample_enriched_nodes() -> list[KnowledgeNode]:
         "It was created by Guido van Rossum and first released in 1991. "
         "Python emphasizes code readability with significant whitespace.",
         source_id="python_intro.txt",
-        position=NodePosition(start_char=0, end_char=200),
+        position=NodePosition(
+            start_char=0, end_char=200, page=1, section="Introduction"
+        ),
         metadata={
             "synthetic_qa": {
                 "qa_pairs": [
@@ -57,6 +61,8 @@ def create_sample_enriched_nodes() -> list[KnowledgeNode]:
             },
             "chunk_type": "introduction",
         },
+        dense_vector=None,
+        sparse_vector=None,
     )
 
     node2 = KnowledgeNode(
@@ -64,7 +70,9 @@ def create_sample_enriched_nodes() -> list[KnowledgeNode]:
         "It is based on standard Python type hints and provides automatic API documentation. "
         "FastAPI achieves high performance comparable to NodeJS and Go.",
         source_id="fastapi_overview.txt",
-        position=NodePosition(start_char=0, end_char=180),
+        position=NodePosition(
+            start_char=0, end_char=180, page=1, section="Introduction"
+        ),
         metadata={
             "synthetic_qa": {
                 "qa_pairs": [
@@ -87,6 +95,8 @@ def create_sample_enriched_nodes() -> list[KnowledgeNode]:
             },
             "chunk_type": "overview",
         },
+        dense_vector=None,
+        sparse_vector=None,
     )
 
     return [node1, node2]
@@ -98,12 +108,10 @@ def main():
     nodes = create_sample_enriched_nodes()
     print(f"✅ Created {len(nodes)} enriched nodes")
 
-    # Convert to trial cases
+    # Convert to trial cases using NodeToTrialCaseAdapter
     print("\n🔄 Converting nodes to trial cases...")
-    trial_cases = QAExporter.nodes_to_trial_cases(
-        nodes=nodes,
-        include_ground_truth_nodes=True,
-    )
+    qa_adapter = NodeToTrialCaseAdapter(include_ground_truth_nodes=True)
+    trial_cases = qa_adapter.adapt_many(nodes)
     print(f"✅ Created {len(trial_cases)} trial cases")
 
     # Display first trial case as example
@@ -119,14 +127,17 @@ def main():
 
     jsonl_path = output_dir / "qa_trial_cases.jsonl"
     print(f"\n💾 Exporting to JSONL: {jsonl_path}")
-    count = QAExporter.export_to_jsonl(nodes, jsonl_path)
-    print(f"✅ Exported {count} trial cases to JSONL")
+    jsonl_adapter = JSONLAdapter()
+    cases_data = [case.model_dump() for case in trial_cases]
+    jsonl_adapter.write(cases_data, jsonl_path)
+    print(f"✅ Exported {len(trial_cases)} trial cases to JSONL")
 
     # Export to JSON (pretty-printed)
     json_path = output_dir / "qa_trial_cases.json"
     print(f"\n💾 Exporting to JSON: {json_path}")
-    count = QAExporter.export_to_json(nodes, json_path, indent=2)
-    print(f"✅ Exported {count} trial cases to JSON")
+    json_adapter = JSONAdapter()
+    json_adapter.write(cases_data, json_path, indent=2)
+    print(f"✅ Exported {len(trial_cases)} trial cases to JSON")
 
     print("\n✨ Export complete! You can now use these trial cases for evaluation.")
     print("\n📁 Output files:")

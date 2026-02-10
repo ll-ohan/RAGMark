@@ -46,8 +46,8 @@ class TrialCase(BaseModel):
         None,
         description="Expected node IDs for retrieval evaluation",
     )
-    metadata: dict[str, Any] = Field(
-        default_factory=dict,
+    metadata: dict[str, str | int | float | dict[str, Any] | None] = Field(
+        default_factory=dict[str, str | int | float | dict[str, Any] | None],
         description="Additional metadata (difficulty, category, etc.)",
     )
 
@@ -231,7 +231,7 @@ class AuditReport(BaseModel):
         """
         rows: list[dict[str, Any]] = []
         for result in self.per_case_results:
-            row: dict[str, Any] = {
+            row: dict[str, bool | str | int | float | None] = {
                 "case_id": result.case_id,
                 "predicted_answer": result.predicted_answer,
                 "query": result.trace.query,

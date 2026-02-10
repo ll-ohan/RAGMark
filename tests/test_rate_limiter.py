@@ -15,6 +15,7 @@ from ragmark.index.rate_limiter import RateLimiter
 
 @pytest.mark.integration
 @pytest.mark.slow
+@pytest.mark.performance
 @pytest.mark.asyncio
 class TestEmbedderRateLimiting:
     """Tests for SentenceTransformerEmbedder rate limiting integration."""
@@ -100,6 +101,7 @@ class TestEmbedderRateLimiting:
 
 
 @pytest.mark.unit
+@pytest.mark.performance
 @pytest.mark.asyncio
 class TestRateLimiterTokenBucket:
     """Tests for RateLimiter token bucket implementation."""

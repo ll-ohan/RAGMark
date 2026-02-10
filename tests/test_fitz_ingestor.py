@@ -348,7 +348,6 @@ class TestFitzIngestor:
         assert "Failed to extract TOC" in caplog.text
 
     @pytest.mark.integration
-    @pytest.mark.rag_edge_case
     def test_ingest_should_correctly_handle_unicode_and_emojis(
         self, pdf_bytes_factory: Callable[..., bytes]
     ) -> None:
@@ -618,6 +617,7 @@ class TestFitzIngestor:
 
     @pytest.mark.integration
     @pytest.mark.slow
+    @pytest.mark.performance
     def test_ingest_should_handle_large_files_without_excessive_memory_growth(
         self, pdf_bytes_factory: Callable[..., bytes], tmp_path: Path
     ) -> None:

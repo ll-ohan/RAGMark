@@ -5,6 +5,23 @@ pairs used for evaluation and testing of RAG systems.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import TypedDict
+
+
+class SyntheticQAPairData(TypedDict, total=False):
+    question: str
+    answer: str
+    confidence: float
+    generated_at: str
+
+
+class SyntheticQAMetadata(TypedDict, total=False):
+    qa_pairs: list[SyntheticQAPairData]
+    generated_at: str
+    model: str
+    num_questions_requested: int
+    num_questions_validated: int
+    batch_id: str
 
 
 class SyntheticQA(BaseModel):

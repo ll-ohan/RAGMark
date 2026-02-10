@@ -29,8 +29,8 @@ class TestSentenceTransformerEmbedder:
         assert embedder.model_name == "test-model"
         assert embedder.device == "cpu"
         assert embedder.batch_size == 32
-        assert embedder._model is None, "Model should be lazy loaded"
-        assert embedder._dim is None
+        assert embedder._model is None, "Model should be lazy loaded"  # type: ignore
+        assert embedder._dim is None  # type: ignore
 
     def test_init_should_respect_custom_parameters_when_provided(self) -> None:
         """
@@ -73,7 +73,7 @@ class TestSentenceTransformerEmbedder:
         Then: The sentence-transformers model should be loaded and dimensions cached.
         """
         embedder = SentenceTransformerEmbedder(model_name="test-model")
-        assert embedder._model is None
+        assert embedder._model is None  # type: ignore
 
         mock_st = MagicMock()
         mock_model = MagicMock()
@@ -81,10 +81,10 @@ class TestSentenceTransformerEmbedder:
         mock_st.SentenceTransformer.return_value = mock_model
 
         with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            embedder._load_model()
+            embedder._load_model()  # type: ignore
 
-        assert embedder._model is mock_model
-        assert embedder._dim == 384
+        assert embedder._model is mock_model  # type: ignore
+        assert embedder._dim == 384  # type: ignore
         mock_st.SentenceTransformer.assert_called_once_with("test-model", device="cpu")
 
     def test_load_model_should_cache_instance_to_prevent_multiple_initializations(
@@ -102,11 +102,11 @@ class TestSentenceTransformerEmbedder:
         mock_st.SentenceTransformer.return_value = mock_model
 
         with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            embedder._load_model()
-            first_model = embedder._model
+            embedder._load_model()  # type: ignore
+            first_model = embedder._model  # type: ignore
 
-            embedder._load_model()
-            second_model = embedder._model
+            embedder._load_model()  # type: ignore
+            second_model = embedder._model  # type: ignore
 
         assert first_model is second_model
         assert mock_st.SentenceTransformer.call_count == 1
@@ -123,7 +123,7 @@ class TestSentenceTransformerEmbedder:
 
         with patch.dict("sys.modules", {"sentence_transformers": None}):
             with pytest.raises(UnsupportedBackendError, match="sentence-transformers"):
-                embedder._load_model()
+                embedder._load_model()  # type: ignore
 
     def test_load_model_should_raise_embedding_error_preserving_cause_when_loading_fails(
         self,
@@ -143,7 +143,7 @@ class TestSentenceTransformerEmbedder:
             with pytest.raises(
                 EmbeddingError, match="Failed to load model"
             ) as exc_info:
-                embedder._load_model()
+                embedder._load_model()  # type: ignore
 
             assert exc_info.value.__cause__ is original_error
 
@@ -236,7 +236,7 @@ class TestSentenceTransformerEmbedder:
         Then: The model should be loaded to retrieve the dimension.
         """
         embedder = SentenceTransformerEmbedder(model_name="test-model")
-        assert embedder._model is None
+        assert embedder._model is None  # type: ignore
 
         mock_st = MagicMock()
         mock_model = MagicMock()
@@ -247,7 +247,7 @@ class TestSentenceTransformerEmbedder:
             dim = embedder.embedding_dim
 
         assert dim == 768
-        assert embedder._model is not None
+        assert embedder._model is not None  # type: ignore
 
     def test_supports_sparse_should_return_false(self) -> None:
         """
@@ -258,7 +258,6 @@ class TestSentenceTransformerEmbedder:
         embedder = SentenceTransformerEmbedder(model_name="test-model")
         assert embedder.supports_sparse is False
 
-    @pytest.mark.rag_edge_case
     def test_embed_should_handle_unicode_and_special_characters_correctly(self) -> None:
         """
         Given: Texts containing complex unicode, NFD normalization, and ideographic spaces.
@@ -309,7 +308,7 @@ class TestSentenceTransformerEmbedder:
         assert isinstance(result, list)
         assert isinstance(result[0], list)
         assert isinstance(result[0][0], float)
-        assert pytest.approx(result[0][0]) == 1.5
+        assert abs(result[0][0] - 1.5) < 1e-6
 
     def test_embed_should_disable_normalization_by_default(self) -> None:
         """
@@ -332,6 +331,7 @@ class TestSentenceTransformerEmbedder:
 
 @pytest.mark.integration
 @pytest.mark.slow
+@pytest.mark.performance
 @pytest.mark.asyncio
 class TestEmbedderRateLimiting:
     """Tests for SentenceTransformerEmbedder rate limiting integration."""

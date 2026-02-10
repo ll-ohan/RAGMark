@@ -4,7 +4,7 @@ import inspect
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from io import BytesIO
 from pathlib import Path
-from typing import Any, BinaryIO, cast
+from typing import Any, BinaryIO, Literal, cast
 
 import pytest
 from conftest import assert_abstract_class_cannot_be_instantiated
@@ -59,7 +59,9 @@ class MinimalVectorIndex(VectorIndex):
         instance.embedder = embedder
         return instance
 
-    async def add(self, nodes: list[KnowledgeNode]) -> None:
+    async def add(
+        self, nodes: list[KnowledgeNode], monitoring: Any | None = None
+    ) -> None:
         if self._should_fail:
             try:
                 raise ValueError("Simulated internal error")
@@ -316,6 +318,10 @@ class MinimalLLMDriver(BaseLLMDriver):
         max_tokens: int,
         temperature: float = 0.7,
         stop: list[str] | None = None,
+        response_format: dict[
+            str, dict[Literal["json_schema"], Any] | Literal["json_object"]
+        ]
+        | None = None,
     ) -> GenerationResult:
         if self._should_fail:
             try:
@@ -1395,7 +1401,7 @@ class TestBaseIngestorContract:
         """
         ingestor = MinimalIngestor()
 
-        files = []
+        files: list[Path] = []
         for i in range(3):
             file_path = tmp_path / f"doc_{i}.txt"
             file_path.write_text(f"Content {i}")
@@ -1422,7 +1428,7 @@ class TestBaseIngestorContract:
         """
         ingestor = MinimalIngestor()
 
-        files = []
+        files: list[Path] = []
         for i in range(2):
             file_path = tmp_path / f"file_{i}.txt"
             file_path.write_text(f"File {i}")
@@ -1617,7 +1623,7 @@ class TestBaseLLMDriverContract:
 
         assert inspect.isasyncgen(stream)
 
-        chunks = []
+        chunks: list[Any] = []
         async for chunk in stream:
             chunks.append(chunk)
             assert isinstance(chunk, str)

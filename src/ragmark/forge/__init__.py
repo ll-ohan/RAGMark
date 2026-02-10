@@ -12,7 +12,6 @@ from ragmark.forge.factory import (
 )
 from ragmark.forge.fragmenters import BaseFragmenter
 from ragmark.forge.ingestors import BaseIngestor
-from ragmark.forge.qa_exporter import QAExporter
 from ragmark.forge.runner import ForgeRunner
 
 __all__ = [
@@ -21,7 +20,6 @@ __all__ = [
     "IngestorFactory",
     "FragmenterFactory",
     "ForgeRunner",
-    "QAExporter",
     "register_ingestor",
     "register_fragmenter",
 ]

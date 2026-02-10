@@ -9,8 +9,20 @@ import asyncio
 import pytest
 
 from ragmark.config.profile import StreamingMetricsConfig
-from ragmark.forge.metrics import BaseMetricsCollector, MetricsManager
 from ragmark.forge.runner import StreamingMetrics
+from ragmark.metrics.base import MonitoringMetric
+from ragmark.metrics.metrics import MetricsManager
+from ragmark.schemas.documents import KnowledgeNode, NodePosition
+
+
+def _make_node(index: int) -> KnowledgeNode:
+    return KnowledgeNode(
+        content=f"Node {index}",
+        source_id="source",
+        position=NodePosition(start_char=0, end_char=1, page=1, section="section"),
+        dense_vector=[index * 0.1, index * 0.2],
+        sparse_vector={0: index * 0.3, 1: index * 0.4},
+    )
 
 
 @pytest.mark.unit
@@ -32,8 +44,12 @@ class TestMetricsManager:
         metrics1 = StreamingMetrics()
         metrics2 = StreamingMetrics()
 
-        queue1: asyncio.Queue[int] = asyncio.Queue(maxsize=10)
-        queue2: asyncio.Queue[int] = asyncio.Queue(maxsize=20)
+        queue1: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
+        queue2: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=20
+        )
 
         metrics1.configure(queue1, StreamingMetricsConfig(interval=0.1))
         metrics2.configure(queue2, StreamingMetricsConfig(interval=0.1))
@@ -59,10 +75,11 @@ class TestMetricsManager:
             executes stop_monitoring before raising.
         """
 
-        class FailingCollector(BaseMetricsCollector):
+        class FailingCollector(MonitoringMetric):
             """Test fake that simulates stop_monitoring failure."""
 
             def __init__(self) -> None:
+                super().__init__(enabled=True)
                 self.started = False
                 self.stopped = False
 
@@ -77,7 +94,9 @@ class TestMetricsManager:
                 return {"status": "failed"}
 
         normal_metrics = StreamingMetrics()
-        queue = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
         normal_metrics.configure(queue, StreamingMetricsConfig(interval=0.1))
 
         failing_collector = FailingCollector()
@@ -106,14 +125,18 @@ class TestMetricsManager:
         metrics1 = StreamingMetrics()
         metrics2 = StreamingMetrics()
 
-        queue1 = asyncio.Queue(maxsize=10)
-        queue2 = asyncio.Queue(maxsize=20)
+        queue1: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
+        queue2: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=20
+        )
 
         for i in range(5):
-            await queue1.put(i)
+            await queue1.put(_make_node(i))
 
         for i in range(10):
-            await queue2.put(i)
+            await queue2.put(_make_node(i + 100))
 
         metrics1.configure(queue1, StreamingMetricsConfig(interval=0.1))
         metrics2.configure(queue2, StreamingMetricsConfig(interval=0.1))
@@ -149,10 +172,11 @@ class TestMetricsManager:
             reflect attempted start and successful cleanup.
         """
 
-        class FailingStartCollector(BaseMetricsCollector):
+        class FailingStartCollector(MonitoringMetric):
             """Test fake that simulates start_monitoring failure."""
 
             def __init__(self) -> None:
+                super().__init__(enabled=True)
                 self.started = False
                 self.stopped = False
 
@@ -167,7 +191,9 @@ class TestMetricsManager:
                 return {"status": "failed"}
 
         normal_metrics = StreamingMetrics()
-        queue = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
         normal_metrics.configure(queue, StreamingMetricsConfig(interval=0.1))
 
         failing_collector = FailingStartCollector()

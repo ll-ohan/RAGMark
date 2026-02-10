@@ -76,8 +76,8 @@ class BasicQAValidator(QAValidator):
         Returns:
             Filtered list of valid QA pairs.
         """
-        valid_pairs = []
-        seen_questions = set()
+        valid_pairs: list[SyntheticQA] = []
+        seen_questions: set[str] = set()
 
         for qa in qa_pairs:
             if len(qa.question) < self.min_question_length:

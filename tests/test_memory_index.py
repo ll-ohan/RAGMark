@@ -19,7 +19,6 @@ from ragmark.schemas.retrieval import SearchCursor, SearchResult
 
 
 @pytest.mark.unit
-@pytest.mark.rag_edge_case
 @pytest.mark.asyncio
 class TestMemoryIndexVectors:
     """Test suite for Vector operations and Mathematical Edge Cases."""
@@ -301,7 +300,7 @@ class TestMemoryIndexVectors:
 
         query = np.array([0.0, 1.0], dtype=np.float32)
 
-        similarities = index._compute_similarities(query_vector=query, vectors=1)
+        similarities = index._compute_similarities(query_vector=query, vectors=1)  # type: ignore
 
         assert len(similarities) == 1
         assert_allclose(similarities[0], 0.0, atol=1e-6)
@@ -390,7 +389,6 @@ class TestMemoryIndexMetrics:
 
         assert_allclose(results[0].score, 6.0, atol=1e-6)
 
-    @pytest.mark.rag_edge_case
     async def test_search_should_return_perfect_score_for_identical_vectors(
         self, memory_index_factory: Callable[..., Any]
     ) -> None:
@@ -421,7 +419,6 @@ class TestMemoryIndexMetrics:
 
         assert_allclose(results[0].score, 1.0, atol=1e-6)
 
-    @pytest.mark.rag_edge_case
     async def test_search_should_return_zero_score_for_orthogonal_vectors(
         self, memory_index_factory: Callable[..., Any]
     ) -> None:
@@ -510,7 +507,6 @@ class TestMemoryIndexHybrid:
         assert_allclose(results[0].score, 0.6, atol=1e-6)
         assert_allclose(results[1].score, 0.4, atol=1e-6)
 
-    @pytest.mark.rag_edge_case
     async def test_search_hybrid_should_handle_zero_variance_normalization(
         self, memory_index_factory: Callable[..., Any]
     ) -> None:
@@ -856,11 +852,10 @@ class TestMemoryIndexCRUD:
         await index.clear()
 
         assert await index.count() == 0
-        assert len(index._node_ids) == 0
-        assert index._vectors.shape[0] == 0
+        assert len(index._node_ids) == 0  # type: ignore
+        assert index._vectors.shape[0] == 0  # type: ignore
 
 
-@pytest.mark.concurrency
 @pytest.mark.asyncio
 class TestMemoryIndexConcurrency:
     """Stress tests for thread safety."""
@@ -929,15 +924,15 @@ class TestMemoryIndexConcurrency:
 
         await asyncio.gather(adder_task(), deleter_task(), searcher_task())
 
-        assert len(index._node_ids) == len(
-            index._vectors
+        assert len(index._node_ids) == len(  # type: ignore
+            index._vectors  # type: ignore
         ), "Metadata and Vector arrays desynchronized"
-        assert len(index._node_ids) == len(
-            index._metadata
+        assert len(index._node_ids) == len(  # type: ignore
+            index._metadata  # type: ignore
         ), "Node IDs and Metadata count mismatch"
 
-        max_idx = len(index._node_ids) - 1
-        for _, entries in index._inverted_index.items():
+        max_idx = len(index._node_ids) - 1  # type: ignore
+        for _, entries in index._inverted_index.items():  # type: ignore
             for doc_idx, _ in entries:
                 assert (
                     doc_idx <= max_idx
@@ -1023,9 +1018,9 @@ class TestMemoryIndexPersistence:
         await original_index.save(save_dir)
         loaded_index = await MemoryIndex.load(save_dir)
 
-        assert 99 in loaded_index._inverted_index
-        assert len(loaded_index._inverted_index[99]) == 1
-        doc_idx, weight = loaded_index._inverted_index[99][0]
+        assert 99 in loaded_index._inverted_index  # type: ignore
+        assert len(loaded_index._inverted_index[99]) == 1  # type: ignore
+        _, weight = loaded_index._inverted_index[99][0]  # type: ignore
         assert_allclose(weight, 0.8, atol=1e-6)
 
     @pytest.mark.asyncio
@@ -1046,7 +1041,6 @@ class TestMemoryIndexPersistence:
         with pytest.raises(FileNotFoundError):
             await MemoryIndex.load(bad_path)
 
-    @pytest.mark.rag_edge_case
     @pytest.mark.asyncio
     async def test_load_should_fallback_to_pickle_for_legacy_indexes(
         self, tmp_path: Path, memory_index_factory: Callable[..., Any]
@@ -1098,8 +1092,8 @@ class TestMemoryIndexPersistence:
         loaded_index = await MemoryIndex.load(save_dir)
 
         assert loaded_index.collection_name == "legacy_col"
-        assert loaded_index._node_ids == ["legacy_node"]
-        assert 55 in loaded_index._inverted_index
+        assert loaded_index._node_ids == ["legacy_node"]  # type: ignore
+        assert 55 in loaded_index._inverted_index  # type: ignore
 
 
 @pytest.mark.unit
@@ -1107,6 +1101,7 @@ class TestMemoryIndexPersistence:
 class TestAsyncSaveLoadNonBlocking:
     """Tests for async save/load non-blocking behavior."""
 
+    @pytest.mark.performance
     async def test_async_save_should_not_block_concurrent_searches(
         self, tmp_path: Path
     ) -> None:
@@ -1125,9 +1120,12 @@ class TestAsyncSaveLoadNonBlocking:
                 node_id=f"node_{i}",
                 content=f"Content {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=i * 20, end_char=(i + 1) * 20),
+                position=NodePosition(
+                    start_char=i * 20, end_char=(i + 1) * 20, page=1, section="Test"
+                ),
                 dense_vector=[float(i % 128)] * 128,
                 metadata={},
+                sparse_vector=None,
             )
             for i in range(500)
         ]
@@ -1171,9 +1169,12 @@ class TestAsyncSaveLoadNonBlocking:
                 node_id=f"test_{i}",
                 content=f"Test content {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=i * 15, end_char=(i + 1) * 15),
+                position=NodePosition(
+                    start_char=i * 15, end_char=(i + 1) * 15, page=1, section="Test"
+                ),
                 dense_vector=[float((i + j) % 64) for j in range(64)],
                 metadata={"index": i, "batch": i // 10},
+                sparse_vector=None,
             )
             for i in range(50)
         ]
@@ -1198,6 +1199,7 @@ class TestAsyncSaveLoadNonBlocking:
 
 @pytest.mark.unit
 @pytest.mark.benchmark
+@pytest.mark.performance
 class TestMemoryIndexDeletePerformance:
     """Benchmark tests for MemoryIndex.delete() O(1) optimization."""
 
@@ -1218,9 +1220,12 @@ class TestMemoryIndexDeletePerformance:
                 node_id=f"node_{i}",
                 content=f"Test content {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=i * 100, end_char=(i + 1) * 100),
+                position=NodePosition(
+                    start_char=i * 100, end_char=(i + 1) * 100, page=1, section="Test"
+                ),
                 dense_vector=[0.1] * 128,
                 metadata={"index": i},
+                sparse_vector=None,
             )
             for i in range(10000)
         ]
@@ -1252,9 +1257,12 @@ class TestMemoryIndexDeletePerformance:
                 node_id=f"test_{i}",
                 content=f"Content {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=i * 50, end_char=(i + 1) * 50),
+                position=NodePosition(
+                    start_char=i * 50, end_char=(i + 1) * 50, page=1, section="Test"
+                ),
                 dense_vector=[float(i)] * 64,
                 metadata={},
+                sparse_vector=None,
             )
             for i in range(100)
         ]
@@ -1263,9 +1271,9 @@ class TestMemoryIndexDeletePerformance:
         to_delete = [f"test_{i}" for i in [5, 15, 25, 35, 45, 55, 65, 75, 85, 95]]
         await index.delete(to_delete)
 
-        for idx, node_id in enumerate(index._node_ids):
-            assert index._node_id_to_idx[node_id] == idx
-            assert index._nodes[idx].node_id == node_id
+        for idx, node_id in enumerate(index._node_ids):  # type: ignore
+            assert index._node_id_to_idx[node_id] == idx  # type: ignore
+            assert index._nodes[idx].node_id == node_id  # type: ignore
 
 
 @pytest.mark.unit
@@ -1291,9 +1299,12 @@ class TestMemoryIndexLRUEviction:
                     node_id=f"node_{i}",
                     content=f"Content {i}",
                     source_id="test_source",
-                    position=NodePosition(start_char=i * 20, end_char=(i + 1) * 20),
+                    position=NodePosition(
+                        start_char=i * 20, end_char=(i + 1) * 20, page=1, section="Test"
+                    ),
                     dense_vector=[float(i % 64)] * 64,
                     metadata={"batch": batch_start},
+                    sparse_vector=None,
                 )
                 for i in range(batch_start, batch_start + 10)
             ]
@@ -1320,9 +1331,12 @@ class TestMemoryIndexLRUEviction:
                 node_id=f"node_{i}",
                 content=f"Content {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=i * 30, end_char=(i + 1) * 30),
+                position=NodePosition(
+                    start_char=i * 30, end_char=(i + 1) * 30, page=1, section="Test"
+                ),
                 dense_vector=[float(i)] * 32,
                 metadata={},
+                sparse_vector=None,
             )
             for i in range(50)
         ]
@@ -1335,15 +1349,21 @@ class TestMemoryIndexLRUEviction:
                 node_id=f"new_{i}",
                 content=f"New content {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=(i + 50) * 30, end_char=(i + 51) * 30),
+                position=NodePosition(
+                    start_char=(i + 50) * 30,
+                    end_char=(i + 51) * 30,
+                    page=1,
+                    section="Test",
+                ),
                 dense_vector=[float(i + 50)] * 32,
                 metadata={},
+                sparse_vector=None,
             )
             for i in range(10)
         ]
         await index.add(new_nodes)
 
-        remaining_ids = set(index._node_ids)
+        remaining_ids = set(index._node_ids)  # type: ignore
         recently_accessed = {f"node_{i}" for i in range(40, 50)}
 
         retained = recently_accessed & remaining_ids
@@ -1366,15 +1386,18 @@ class TestMemoryIndexLRUEviction:
                 node_id=f"seq_{i}",
                 content=f"Sequential {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=i * 15, end_char=(i + 1) * 15),
+                position=NodePosition(
+                    start_char=i * 15, end_char=(i + 1) * 15, page=1, section="Test"
+                ),
                 dense_vector=[float(i % 16)] * 16,
                 metadata={"order": i},
+                sparse_vector=None,
             )
             for i in range(40)
         ]
         await index.add(all_nodes)
 
-        remaining_ids = set(index._node_ids)
+        remaining_ids = set(index._node_ids)  # type: ignore
         first_ten = {f"seq_{i}" for i in range(10)}
         last_thirty = {f"seq_{i}" for i in range(10, 40)}
 
@@ -1403,9 +1426,12 @@ class TestSearchPagination:
                 node_id=f"node_{i}",
                 content=f"Content {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="Test"
+                ),
                 dense_vector=[float(i)] * 32,
                 metadata={},
+                sparse_vector=None,
             )
             for i in range(100)
         ]
@@ -1437,16 +1463,19 @@ class TestSearchPagination:
                 node_id=f"test_{i}",
                 content=f"Test {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="Test"
+                ),
                 dense_vector=[float(i % 16)] * 16,
                 metadata={},
+                sparse_vector=None,
             )
             for i in range(50)
         ]
         await index.add(nodes)
 
         cursor = SearchCursor(offset=0, page_size=15)
-        all_results = []
+        all_results: list[SearchResult] = []
 
         while True:
             page, cursor = await index.search_paginated(
@@ -1477,9 +1506,12 @@ class TestSearchPagination:
                 node_id=f"n_{i}",
                 content=f"C {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="Test"
+                ),
                 dense_vector=[1.0] * 8,
                 metadata={},
+                sparse_vector=None,
             )
             for i in range(20)
         ]
@@ -1510,9 +1542,12 @@ class TestSearchPagination:
                 node_id=f"doc_{i}",
                 content=f"Document {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="Test"
+                ),
                 dense_vector=[float(i % 64)] * 64,
                 metadata={},
+                sparse_vector=None,
             )
             for i in range(75)
         ]
@@ -1542,9 +1577,12 @@ class TestSearchPagination:
                 node_id=f"item_{i}",
                 content=f"Item {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="Test"
+                ),
                 dense_vector=[float(i)] * 32,
                 metadata={"category": "A" if i % 2 == 0 else "B"},
+                sparse_vector=None,
             )
             for i in range(100)
         ]
@@ -1552,7 +1590,7 @@ class TestSearchPagination:
 
         cursor = SearchCursor(offset=0, page_size=10)
 
-        page, next_cursor = await index.search_paginated(
+        page, _ = await index.search_paginated(
             query_vector=[25.0] * 32, cursor=cursor, filters={"category": "A"}
         )
 
@@ -1564,7 +1602,6 @@ class TestSearchPagination:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.rag_edge_case
 class TestMemoryIndexEdgeCases:
     """Additional edge cases for MemoryIndex coverage."""
 
@@ -1588,7 +1625,7 @@ class TestMemoryIndexEdgeCases:
         vectors = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
 
         with pytest.raises(ValueError, match="Unknown distance metric"):
-            index._compute_similarities(query, vectors)
+            index._compute_similarities(query, vectors)  # type: ignore
 
     async def test_evict_nodes_should_return_early_for_zero_or_negative_count(
         self, memory_index_factory: Callable[..., Any]
@@ -1624,13 +1661,13 @@ class TestMemoryIndexEdgeCases:
         initial_count = await index.count()
 
         # Call _evict_nodes with count=0 (should return early)
-        await index._evict_nodes(0)
+        await index._evict_nodes(0)  # type: ignore
 
         # Verify count unchanged
         assert await index.count() == initial_count
 
         # Also test negative count
-        await index._evict_nodes(-5)
+        await index._evict_nodes(-5)  # type: ignore
         assert await index.count() == initial_count
 
     async def test_index_can_be_used_as_async_context_manager(
@@ -1745,8 +1782,11 @@ class TestSearchCursorEdgeCases:
                 node_id=f"x_{i}",
                 content="content",
                 source_id="test_source",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="Test"
+                ),
                 dense_vector=[1.0] * 16,
+                sparse_vector=None,
                 metadata={},
             )
             for i in range(30)
@@ -1775,8 +1815,11 @@ class TestSearchCursorEdgeCases:
                 node_id=f"single_{i}",
                 content="test",
                 source_id="test_source",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="Test"
+                ),
                 dense_vector=[0.5] * 8,
+                sparse_vector=None,
                 metadata={},
             )
             for i in range(10)
@@ -1880,8 +1923,11 @@ class TestProductionResilience:
                 node_id=f"evict_test_{i}",
                 content=f"Content {i}",
                 source_id="test_source",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="Test"
+                ),
                 dense_vector=[float(i % 16)] * 16,
+                sparse_vector=None,
                 metadata={},
             )
             for i in range(60)
@@ -1890,7 +1936,7 @@ class TestProductionResilience:
 
         cursor = SearchCursor(offset=0, page_size=10)
 
-        pages = []
+        pages: list[list[SearchResult]] = []
         for _ in range(5):
             page, cursor = await index.search_paginated(
                 query_vector=[8.0] * 16, cursor=cursor

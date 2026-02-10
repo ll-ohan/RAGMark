@@ -27,6 +27,16 @@ LOG_FORMAT_DEBUG = (
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
+def _resolve_log_level(level: int | str | None) -> int | str:
+    """Resolve a log level, falling back to environment defaults."""
+    if level is None:
+        level_str = os.getenv("RAGMARK_LOG_LEVEL", "INFO").upper()
+        return getattr(logging, level_str, logging.INFO)
+    if isinstance(level, str):
+        return getattr(logging, level.upper(), logging.INFO)
+    return level
+
+
 class JSONFormatter(logging.Formatter):
     """Format logs as newline-delimited JSON for production systems.
 
@@ -79,11 +89,7 @@ def configure_logger(
         return logger
 
     # Determine log level from parameter or environment
-    if level is None:
-        level_str = os.getenv("RAGMARK_LOG_LEVEL", "INFO").upper()
-        level = getattr(logging, level_str, logging.INFO)
-    elif isinstance(level, str):
-        level = getattr(logging, level.upper(), logging.INFO)
+    level = _resolve_log_level(level)
 
     logger.setLevel(level)
 

@@ -4,13 +4,17 @@ This module tests the question generation functionality using fake implementatio
 to avoid LLM dependencies, following the anti-mocking strategy.
 """
 
+import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
+from pydantic import ValidationError
 
+from ragmark.config.profile import QuestionGeneratorConfig
 from ragmark.exceptions import QuestionGenerationError
 from ragmark.forge.qa_validator import BasicQAValidator
 from ragmark.forge.question_generator import (
@@ -18,10 +22,20 @@ from ragmark.forge.question_generator import (
     BaseQuestionGenerator,
     LLMQuestionGenerator,
 )
+from ragmark.generation.drivers import LlamaCppDriver
 from ragmark.generation.prompts import SYNTHETIC_QA_BATCH_TEMPLATE
-from ragmark.schemas.documents import KnowledgeNode, NodePosition
+from ragmark.schemas.documents import KnowledgeNode, MetadataDict, NodePosition
 from ragmark.schemas.generation import GenerationResult, TokenUsage
 from ragmark.schemas.qa import SyntheticQA
+
+if TYPE_CHECKING:
+
+    def approx(expected: float) -> object:
+        ...
+else:
+
+    def approx(expected: float) -> object:
+        return pytest.approx(expected)
 
 
 class FakeLLMDriver(BaseLLMDriver):
@@ -51,7 +65,11 @@ class FakeLLMDriver(BaseLLMDriver):
         max_tokens: int,
         temperature: float = 0.7,
         stop: list[str] | None = None,
-        response_format: dict | None = None,
+        response_format: dict[
+            str, dict[Literal["json_schema"], Any] | Literal["json_object"]
+        ]
+        | None
+        | None = None,
     ) -> GenerationResult:
         """Generate fake text completion with deterministic output."""
         prompt_tokens = len(prompt.split())
@@ -92,7 +110,7 @@ class FakeLLMDriver(BaseLLMDriver):
         """Enter async context."""
         return self
 
-    async def __aexit__(self, _exc_type, _exc_val, _exc_tb) -> None:
+    async def __aexit__(self, _exc_type: Any, _exc_val: Any, _exc_tb: Any) -> None:
         """Exit async context."""
         pass
 
@@ -123,7 +141,7 @@ class FakeQuestionGenerator(BaseQuestionGenerator):
         self._validation_enabled = validation_enabled
 
     @classmethod
-    def from_config(cls, config) -> "FakeQuestionGenerator":
+    def from_config(cls, config: "QuestionGeneratorConfig") -> "FakeQuestionGenerator":
         """Create from configuration."""
         return cls(
             num_questions=config.num_questions,
@@ -148,7 +166,7 @@ class FakeQuestionGenerator(BaseQuestionGenerator):
         Raises:
             QuestionGenerationError: If any node ID is in error set.
         """
-        enriched = []
+        enriched: list[KnowledgeNode] = []
 
         for node in nodes:
             if node.node_id in self._error_nodes:
@@ -156,7 +174,7 @@ class FakeQuestionGenerator(BaseQuestionGenerator):
                     f"Simulated failure for {node.node_id}", node_id=node.node_id
                 )
 
-            qa_pairs = []
+            qa_pairs: list[SyntheticQA] = []
             for i in range(self._num_questions):
                 qa = SyntheticQA(
                     question=f"What is discussed in section {i+1} of node {node.node_id}?",
@@ -169,7 +187,7 @@ class FakeQuestionGenerator(BaseQuestionGenerator):
                 validator = BasicQAValidator()
                 qa_pairs = validator.validate(qa_pairs)
 
-            enriched_metadata = {
+            enriched_metadata: MetadataDict = {
                 **node.metadata,
                 "synthetic_qa": {
                     "qa_pairs": [qa.model_dump() for qa in qa_pairs],
@@ -192,9 +210,48 @@ class FakeQuestionGenerator(BaseQuestionGenerator):
         return self._num_questions
 
 
+class FailingLLMDriver(FakeLLMDriver):
+    """Fake LLM driver that raises during generation."""
+
+    async def generate(
+        self,
+        prompt: str,
+        max_tokens: int,
+        temperature: float = 0.7,
+        stop: list[str] | None = None,
+        response_format: dict[
+            str, dict[Literal["json_schema"], Any] | Literal["json_object"]
+        ]
+        | None
+        | None = None,
+    ) -> GenerationResult:
+        raise RuntimeError("driver failure")
+
+
+class ErroringBatchGenerator(FakeQuestionGenerator):
+    """Fake generator that raises during batch processing."""
+
+    async def generate_batch_async(
+        self, nodes: list[KnowledgeNode]
+    ) -> list[KnowledgeNode]:
+        raise QuestionGenerationError(
+            "Synthetic batch failure",
+            node_id=nodes[0].node_id if nodes else None,
+        ) from ValueError("batch error")
+
+
+class ErroringGenerateBatchLLM(LLMQuestionGenerator):
+    """LLM generator that raises unexpected errors in batch generation."""
+
+    async def generate_batch_async(
+        self, nodes: list[KnowledgeNode]
+    ) -> list[KnowledgeNode]:
+        raise RuntimeError("unexpected failure")
+
+
 @pytest.mark.unit
 def test_fake_generator_should_enrich_node_with_qa_pairs(
-    test_node_factory,
+    test_node_factory: Callable[..., KnowledgeNode],
 ):
     """Validates fake generator enriches single node with QA pairs.
 
@@ -214,7 +271,7 @@ def test_fake_generator_should_enrich_node_with_qa_pairs(
 
     enriched = fake_gen.generate_sync(node)
 
-    qa_data = enriched.metadata["synthetic_qa"]
+    qa_data = cast(dict[str, Any], enriched.metadata.get("synthetic_qa"))
     assert qa_data["model"] == "fake"
     assert qa_data["batch_id"] == "fake_batch"
     assert len(qa_data["qa_pairs"]) == 3
@@ -232,7 +289,7 @@ def test_fake_generator_should_enrich_node_with_qa_pairs(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_batch_generator_should_enrich_all_nodes(
-    test_node_factory,
+    test_node_factory: Callable[..., KnowledgeNode],
 ):
     """Validates batch generation enriches all nodes in batch.
 
@@ -256,10 +313,10 @@ async def test_batch_generator_should_enrich_all_nodes(
     enriched = await fake_gen.generate_batch_async(nodes)
 
     assert len(enriched) == 3
-    node_ids = set()
+    node_ids: set[str] = set()
 
     for node in enriched:
-        qa_data = node.metadata["synthetic_qa"]
+        qa_data = cast(dict[str, Any], node.metadata.get("synthetic_qa"))
         assert qa_data["model"] == "fake"
         assert len(qa_data["qa_pairs"]) == 3
         assert all(qa["question"].endswith("?") for qa in qa_data["qa_pairs"])
@@ -271,7 +328,7 @@ async def test_batch_generator_should_enrich_all_nodes(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_generator_should_raise_on_error_node(
-    test_node_factory,
+    test_node_factory: Callable[..., KnowledgeNode],
 ):
     """Validates error injection mechanism works correctly.
 
@@ -315,11 +372,13 @@ def test_qa_validator_should_filter_invalid_questions():
     """
     validator = BasicQAValidator()
     qa_pairs = [
-        SyntheticQA(question="Valid question?", answer="Valid answer"),
+        SyntheticQA(question="Valid question?", answer="Valid answer", confidence=0.9),
         SyntheticQA.model_construct(question="No mark", answer="Answer"),
         SyntheticQA.model_construct(question="Too short?", answer="A"),
-        SyntheticQA(question="Valid question?", answer="Duplicate"),
-        SyntheticQA(question="Another valid question?", answer="Another answer"),
+        SyntheticQA(question="Valid question?", answer="Duplicate", confidence=0.8),
+        SyntheticQA(
+            question="Another valid question?", answer="Another answer", confidence=0.7
+        ),
     ]
 
     valid = validator.validate(qa_pairs)
@@ -347,7 +406,7 @@ def test_qa_validator_should_filter_short_questions():
     validator = BasicQAValidator(min_question_length=10)
     qa_pairs = [
         SyntheticQA.model_construct(question="Short?", answer="Answer"),
-        SyntheticQA(question="Long enough question?", answer="Answer"),
+        SyntheticQA(question="Long enough question?", answer="Answer", confidence=0.9),
         SyntheticQA.model_construct(question="X?", answer="Answer"),
     ]
 
@@ -373,8 +432,12 @@ def test_qa_validator_should_allow_questions_without_mark_if_not_required():
     """
     validator = BasicQAValidator(require_question_mark=False)
     qa_pairs = [
-        SyntheticQA(question="Question without mark", answer="Valid answer"),
-        SyntheticQA(question="Another question", answer="Another answer"),
+        SyntheticQA(
+            question="Question without mark", answer="Valid answer", confidence=0.9
+        ),
+        SyntheticQA(
+            question="Another question", answer="Another answer", confidence=0.8
+        ),
     ]
 
     valid = validator.validate(qa_pairs)
@@ -389,7 +452,7 @@ def test_qa_validator_should_allow_questions_without_mark_if_not_required():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_streaming_generator_should_batch_and_yield(
-    test_node_factory,
+    test_node_factory: Callable[..., KnowledgeNode],
 ):
     """Validates streaming generation with batching works correctly.
 
@@ -409,13 +472,13 @@ async def test_streaming_generator_should_batch_and_yield(
         for i in range(5):
             yield test_node_factory(f"Content {i}", f"src{i}")
 
-    enriched_nodes = []
+    enriched_nodes: list[KnowledgeNode] = []
     async for node in fake_gen.generate_stream_async(node_generator(), batch_size=2):
         enriched_nodes.append(node)
 
     assert len(enriched_nodes) == 5
     for node in enriched_nodes:
-        qa_data = node.metadata["synthetic_qa"]
+        qa_data = cast(dict[str, Any], node.metadata.get("synthetic_qa"))
         assert qa_data["model"] == "fake"
         assert len(qa_data["qa_pairs"]) == 2
         assert all(qa["question"].endswith("?") for qa in qa_data["qa_pairs"])
@@ -423,7 +486,7 @@ async def test_streaming_generator_should_batch_and_yield(
 
 @pytest.mark.unit
 def test_fake_generator_validation_disabled_returns_all_pairs(
-    test_node_factory,
+    test_node_factory: Callable[..., KnowledgeNode],
 ):
     """Validates that disabling validation returns all generated pairs.
 
@@ -441,7 +504,7 @@ def test_fake_generator_validation_disabled_returns_all_pairs(
 
     enriched = fake_gen.generate_sync(node)
 
-    qa_data = enriched.metadata["synthetic_qa"]
+    qa_data = cast(dict[str, Any], enriched.metadata.get("synthetic_qa"))
     assert qa_data["num_questions_requested"] == 5
     assert qa_data["num_questions_validated"] == 5
     assert len(qa_data["qa_pairs"]) == 5
@@ -450,7 +513,7 @@ def test_fake_generator_validation_disabled_returns_all_pairs(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_generator_should_preserve_original_metadata(
-    test_node_factory,
+    test_node_factory: Callable[..., KnowledgeNode],
 ):
     """Validates that generator preserves existing node metadata.
 
@@ -466,11 +529,13 @@ async def test_generator_should_preserve_original_metadata(
     node = KnowledgeNode(
         content="Test content",
         source_id="test",
-        position=NodePosition(start_char=0, end_char=12),
+        position=NodePosition(start_char=0, end_char=12, page=1, section="section"),
         metadata={
             "custom_field": "custom_value",
             "another_field": 42,
         },
+        dense_vector=None,
+        sparse_vector=None,
     )
 
     fake_gen = FakeQuestionGenerator(num_questions=2)
@@ -478,7 +543,7 @@ async def test_generator_should_preserve_original_metadata(
 
     assert enriched.metadata["custom_field"] == "custom_value"
     assert enriched.metadata["another_field"] == 42
-    qa_data = enriched.metadata["synthetic_qa"]
+    qa_data = cast(dict[str, Any], enriched.metadata.get("synthetic_qa"))
     assert qa_data["model"] == "fake"
     assert len(qa_data["qa_pairs"]) == 2
 
@@ -501,8 +566,8 @@ def test_validator_should_filter_long_questions():
     long_question = "This is a very long question that definitely exceeds the maximum allowed length for questions?"
 
     qa_pairs = [
-        SyntheticQA(question=short_question, answer="Answer"),
-        SyntheticQA(question=long_question, answer="Answer"),
+        SyntheticQA(question=short_question, answer="Answer", confidence=0.9),
+        SyntheticQA(question=long_question, answer="Answer", confidence=0.8),
     ]
 
     valid = validator.validate(qa_pairs)
@@ -566,7 +631,7 @@ def test_json_parsing_should_parse_valid_json_output():
         }
     )
 
-    qa_by_node = generator._parse_batch_qa(json_output, num_nodes=2)
+    qa_by_node = generator._parse_batch_qa(json_output, num_nodes=2)  # type: ignore
 
     assert len(qa_by_node) == 2
     assert len(qa_by_node[0]) == 2
@@ -615,7 +680,7 @@ def test_json_parsing_should_handle_missing_chunks():
         }
     )
 
-    qa_by_node = generator._parse_batch_qa(json_output, num_nodes=3)
+    qa_by_node = generator._parse_batch_qa(json_output, num_nodes=3)  # type: ignore
 
     assert len(qa_by_node) == 3
     assert len(qa_by_node[0]) == 1
@@ -649,7 +714,7 @@ def test_json_parsing_should_reject_invalid_json():
     with pytest.raises(
         QuestionGenerationError, match=r".*not valid JSON.*"
     ) as exc_info:
-        generator._parse_batch_qa(invalid_json, num_nodes=2)
+        generator._parse_batch_qa(invalid_json, num_nodes=2)  # type: ignore
 
     assert "not valid JSON" in str(exc_info.value)
 
@@ -677,7 +742,7 @@ def test_json_parsing_should_reject_wrong_schema():
     wrong_schema_json = json.dumps({"wrong_field": "value"})
 
     with pytest.raises(QuestionGenerationError, match=r".*schema.*") as exc_info:
-        generator._parse_batch_qa(wrong_schema_json, num_nodes=2)
+        generator._parse_batch_qa(wrong_schema_json, num_nodes=2)  # type: ignore
 
     error_msg = str(exc_info.value).lower()
     assert "schema" in error_msg or "chunks" in error_msg
@@ -720,7 +785,7 @@ def test_json_parsing_should_limit_qa_pairs_to_num_questions():
         }
     )
 
-    qa_by_node = generator._parse_batch_qa(json_output, num_nodes=1)
+    qa_by_node = generator._parse_batch_qa(json_output, num_nodes=1)  # type: ignore
 
     assert len(qa_by_node) == 1
     assert len(qa_by_node[0]) == 2
@@ -729,9 +794,8 @@ def test_json_parsing_should_limit_qa_pairs_to_num_questions():
 
 
 @pytest.mark.unit
-@pytest.mark.rag_edge_case
 def test_generator_should_handle_unicode_nfc_nfd_in_content(
-    test_node_factory,
+    test_node_factory: Callable[..., KnowledgeNode],
 ):
     """Validates generator handles NFC/NFD Unicode normalization.
 
@@ -751,7 +815,7 @@ def test_generator_should_handle_unicode_nfc_nfd_in_content(
 
     enriched = fake_gen.generate_sync(node)
 
-    qa_data = enriched.metadata["synthetic_qa"]
+    qa_data = cast(dict[str, Any], enriched.metadata["synthetic_qa"])
     assert len(qa_data["qa_pairs"]) == 2
 
     for qa in qa_data["qa_pairs"]:
@@ -761,9 +825,8 @@ def test_generator_should_handle_unicode_nfc_nfd_in_content(
 
 
 @pytest.mark.unit
-@pytest.mark.rag_edge_case
 def test_generator_should_handle_complex_emoji_in_content(
-    test_node_factory,
+    test_node_factory: Callable[..., KnowledgeNode],
 ):
     """Validates generator handles complex composite emoji.
 
@@ -785,7 +848,7 @@ def test_generator_should_handle_complex_emoji_in_content(
 
     enriched = fake_gen.generate_sync(node)
 
-    qa_data = enriched.metadata["synthetic_qa"]
+    qa_data = cast(dict[str, Any], enriched.metadata["synthetic_qa"])
     assert len(qa_data["qa_pairs"]) == 2
 
     for qa in qa_data["qa_pairs"]:
@@ -796,7 +859,6 @@ def test_generator_should_handle_complex_emoji_in_content(
 
 
 @pytest.mark.unit
-@pytest.mark.rag_edge_case
 def test_validator_should_handle_ideographic_whitespace():
     """Validates validator handles CJK ideographic whitespace correctly.
 
@@ -821,10 +883,12 @@ def test_validator_should_handle_ideographic_whitespace():
         SyntheticQA(
             question=f"東京{ideographic_space}は{ideographic_space}どこに{ideographic_space}ありますか",
             answer=f"東京{ideographic_space}は{ideographic_space}日本{ideographic_space}にあります",
+            confidence=0.1,
         ),
         SyntheticQA(
             question=f"What{ideographic_space}is{ideographic_space}this{ideographic_space}content",
             answer=f"This{ideographic_space}is{ideographic_space}a{ideographic_space}test{ideographic_space}answer",
+            confidence=0.1,
         ),
     ]
 
@@ -838,7 +902,6 @@ def test_validator_should_handle_ideographic_whitespace():
 
 
 @pytest.mark.unit
-@pytest.mark.rag_edge_case
 def test_validator_should_handle_control_characters():
     """Validates validator behavior with control characters in QA pairs.
 
@@ -855,14 +918,16 @@ def test_validator_should_handle_control_characters():
     validator = BasicQAValidator()
 
     qa_pairs = [
-        SyntheticQA(question="Valid question?", answer="Valid answer"),
+        SyntheticQA(question="Valid question?", answer="Valid answer", confidence=0.9),
         SyntheticQA(
             question="Another valid question?",
             answer="Another valid answer",
+            confidence=0.8,
         ),
         SyntheticQA(
             question="Third valid question?",
             answer="Third valid answer",
+            confidence=0.9,
         ),
     ]
 
@@ -878,3 +943,334 @@ def test_validator_should_handle_control_characters():
             or qa.question.startswith("Another")
             or qa.question.startswith("Third")
         )
+
+
+@pytest.mark.unit
+def test_llm_generator_from_config_should_build_driver_and_validator(
+    tmp_path: Path,
+):
+    """Validates LLM generator creation from config.
+
+    Given:
+        A QuestionGeneratorConfig with validation enabled.
+    When:
+        Calling LLMQuestionGenerator.from_config.
+    Then:
+        A LlamaCppDriver is created with configured parameters.
+        The generator uses the expected prompt template and settings.
+    """
+    config = QuestionGeneratorConfig(
+        enabled=True,
+        model_path=tmp_path / "model.gguf",
+        num_questions=2,
+        batch_size=3,
+        temperature=0.2,
+        max_tokens=256,
+        context_window=2048,
+        n_gpu_layers=1,
+        validation=True,
+    )
+
+    generator = LLMQuestionGenerator.from_config(config)
+
+    assert isinstance(generator._driver, LlamaCppDriver)  # type: ignore
+    assert generator._template is SYNTHETIC_QA_BATCH_TEMPLATE  # type: ignore
+    assert generator.num_questions == 2
+    assert generator._batch_size == 3  # type: ignore
+    assert generator._temperature == approx(0.2)  # type: ignore
+    assert generator._max_tokens == 256  # type: ignore
+    assert generator._validator is not None  # type: ignore
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generate_async_should_wrap_unexpected_errors(
+    test_node_factory: Callable[..., KnowledgeNode],
+):
+    """Validates unexpected errors are wrapped with QuestionGenerationError.
+
+    Given:
+        An LLM generator whose batch method raises RuntimeError.
+    When:
+        Calling generate_async.
+    Then:
+        QuestionGenerationError is raised with node_id.
+        The original error is preserved as __cause__.
+    """
+    node = test_node_factory("Content for failure", "src-fail")
+    generator = ErroringGenerateBatchLLM(
+        driver=FakeLLMDriver(),
+        prompt_template=SYNTHETIC_QA_BATCH_TEMPLATE,
+        num_questions=1,
+    )
+
+    with pytest.raises(QuestionGenerationError) as exc_info:
+        await generator.generate_async(node)
+
+    assert exc_info.value.node_id == node.node_id
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+@pytest.mark.unit
+def test_generate_batch_async_should_skip_driver_for_empty_nodes():
+    """Validates empty batch returns without calling the driver.
+
+    Given:
+        An LLM generator with a driver that would fail if called.
+    When:
+        Calling generate_batch_async with an empty list.
+    Then:
+        An empty list is returned and no driver calls occur.
+    """
+
+    class CountingDriver(FakeLLMDriver):
+        def __init__(self) -> None:
+            super().__init__(response_text="")
+            self.calls = 0
+
+        async def generate(
+            self,
+            prompt: str,
+            max_tokens: int,
+            temperature: float = 0.7,
+            stop: list[str] | None = None,
+            response_format: dict[
+                str, dict[Literal["json_schema"], Any] | Literal["json_object"]
+            ]
+            | None
+            | None = None,
+        ) -> GenerationResult:
+            self.calls += 1
+            raise AssertionError("Driver should not be called for empty batch")
+
+    driver = CountingDriver()
+    generator = LLMQuestionGenerator(
+        driver=driver,
+        prompt_template=SYNTHETIC_QA_BATCH_TEMPLATE,
+        num_questions=2,
+    )
+
+    result = asyncio.run(generator.generate_batch_async([]))
+
+    assert result == []
+    assert driver.calls == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_generate_batch_async_should_enrich_nodes_and_validate(
+    test_node_factory: Callable[..., KnowledgeNode],
+):
+    """Validates batch generation enriches nodes and applies validation.
+
+    Given:
+        An LLM generator with JSON output containing mixed validity pairs.
+    When:
+        Calling generate_batch_async for two nodes.
+    Then:
+        Nodes are enriched with synthetic_qa metadata.
+        Invalid pairs (missing '?') are filtered by validator.
+        Batch metadata includes a deterministic batch_id.
+    """
+    response_text = json.dumps(
+        {
+            "chunks": [
+                {
+                    "chunk_id": 1,
+                    "qa_pairs": [
+                        {
+                            "question": "What does the first node discuss?",
+                            "answer": "It discusses the first topic in detail.",
+                            "confidence": 0.9,
+                        },
+                        {
+                            "question": "This question lacks mark",
+                            "answer": "Still a valid length answer.",
+                            "confidence": 0.8,
+                        },
+                    ],
+                },
+                {
+                    "chunk_id": 2,
+                    "qa_pairs": [
+                        {
+                            "question": "What is covered in node two?",
+                            "answer": "Node two covers the second topic.",
+                            "confidence": 0.7,
+                        },
+                        {
+                            "question": "How is node two summarized?",
+                            "answer": "It is summarized with key points.",
+                            "confidence": 0.6,
+                        },
+                    ],
+                },
+            ]
+        }
+    )
+
+    driver = FakeLLMDriver(response_text=response_text)
+    generator = LLMQuestionGenerator(
+        driver=driver,
+        prompt_template=SYNTHETIC_QA_BATCH_TEMPLATE,
+        num_questions=2,
+        validator=BasicQAValidator(),
+    )
+
+    nodes = [
+        test_node_factory("Node one content", "src-1"),
+        test_node_factory("Node two content", "src-2"),
+    ]
+
+    enriched = await generator.generate_batch_async(nodes)
+
+    assert len(enriched) == 2
+
+    first_meta = cast(dict[str, Any], enriched[0].metadata["synthetic_qa"])
+    second_meta = cast(dict[str, Any], enriched[1].metadata["synthetic_qa"])
+
+    assert first_meta["batch_id"] == "batch_1"
+    assert second_meta["batch_id"] == "batch_1"
+    assert first_meta["num_questions_requested"] == 2
+    assert second_meta["num_questions_requested"] == 2
+    assert first_meta["num_questions_validated"] == 1
+    assert second_meta["num_questions_validated"] == 2
+    assert len(first_meta["qa_pairs"]) == 1
+    assert len(second_meta["qa_pairs"]) == 2
+
+    generated_at = first_meta["generated_at"]
+    parsed_dt = datetime.fromisoformat(generated_at)
+    assert parsed_dt.tzinfo is timezone.utc
+    assert first_meta["qa_pairs"][0]["question"].endswith("?")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generate_batch_async_should_wrap_driver_errors(
+    test_node_factory: Callable[..., KnowledgeNode],
+):
+    """Validates driver failures are wrapped with QuestionGenerationError.
+
+    Given:
+        An LLM generator whose driver raises during generation.
+    When:
+        Calling generate_batch_async.
+    Then:
+        QuestionGenerationError is raised with preserved __cause__.
+    """
+    generator = LLMQuestionGenerator(
+        driver=FailingLLMDriver(),
+        prompt_template=SYNTHETIC_QA_BATCH_TEMPLATE,
+        num_questions=1,
+    )
+    node = test_node_factory("Failure content", "src-fail")
+
+    with pytest.raises(QuestionGenerationError) as exc_info:
+        await generator.generate_batch_async([node])
+
+    assert "Failed to generate QA batch" in str(exc_info.value)
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generate_stream_async_should_raise_on_batch_error(
+    test_node_factory: Callable[..., KnowledgeNode],
+):
+    """Validates streaming generation raises on batch failures.
+
+    Given:
+        A generator that raises during batch processing.
+    When:
+        Streaming nodes with batch_size=2.
+    Then:
+        QuestionGenerationError is propagated with __cause__ preserved.
+    """
+    generator = ErroringBatchGenerator(num_questions=2, batch_size=2)
+
+    async def node_stream() -> AsyncIterator[KnowledgeNode]:
+        for i in range(2):
+            yield test_node_factory(f"Content {i}", f"src-{i}")
+
+    with pytest.raises(QuestionGenerationError) as exc_info:
+        async for _node in generator.generate_stream_async(node_stream(), batch_size=2):
+            pass
+
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generate_stream_async_should_raise_on_final_batch_error(
+    test_node_factory: Callable[..., KnowledgeNode],
+):
+    """Validates final batch errors are propagated during streaming.
+
+    Given:
+        A generator that raises during final batch processing.
+    When:
+        Streaming fewer nodes than batch_size.
+    Then:
+        QuestionGenerationError is raised with __cause__ preserved.
+    """
+    generator = ErroringBatchGenerator(num_questions=2, batch_size=3)
+
+    async def node_stream() -> AsyncIterator[KnowledgeNode]:
+        for i in range(2):
+            yield test_node_factory(f"Final {i}", f"src-final-{i}")
+
+    with pytest.raises(QuestionGenerationError) as exc_info:
+        async for _node in generator.generate_stream_async(node_stream(), batch_size=3):
+            pass
+
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.unit
+def test_parse_batch_qa_should_include_validation_error_cause():
+    """Validates schema validation errors preserve __cause__.
+
+    Given:
+        A malformed JSON output that violates schema.
+    When:
+        Parsing with _parse_batch_qa.
+    Then:
+        QuestionGenerationError is raised with ValidationError as __cause__.
+    """
+    generator = LLMQuestionGenerator(
+        driver=FakeLLMDriver(),
+        prompt_template=SYNTHETIC_QA_BATCH_TEMPLATE,
+        num_questions=2,
+    )
+
+    wrong_schema_json = json.dumps({"chunks": [{"chunk_id": 1, "qa_pairs": "bad"}]})
+
+    with pytest.raises(QuestionGenerationError) as exc_info:
+        generator._parse_batch_qa(wrong_schema_json, num_nodes=1)  # type: ignore
+
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, ValidationError)
+
+
+@pytest.mark.unit
+def test_num_questions_property_should_return_configured_value():
+    """Validates num_questions property reflects configuration.
+
+    Given:
+        An LLMQuestionGenerator configured with num_questions=4.
+    When:
+        Accessing num_questions.
+    Then:
+        The property returns the configured value.
+    """
+    generator = LLMQuestionGenerator(
+        driver=FakeLLMDriver(),
+        prompt_template=SYNTHETIC_QA_BATCH_TEMPLATE,
+        num_questions=4,
+    )
+
+    assert generator.num_questions == 4

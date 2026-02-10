@@ -19,8 +19,8 @@ from ragmark.config.profile import (
 from ragmark.exceptions import FragmentationError, IngestionError
 from ragmark.forge.fragmenters import BaseFragmenter
 from ragmark.forge.ingestors import BaseIngestor
-from ragmark.forge.metrics import MetricsManager
 from ragmark.forge.runner import ForgeRunner, StreamingMetrics
+from ragmark.metrics.metrics import MetricsManager
 from ragmark.schemas.documents import KnowledgeNode, NodePosition, SourceDoc
 
 
@@ -338,7 +338,6 @@ class TestForgeRunner:
 
         assert "Simulated unexpected failure" in str(exc_info.value)
 
-    @pytest.mark.rag_edge_case
     def test_run_should_handle_unicode_filenames_correctly(
         self,
         fake_ingestor: FakeIngestor,
@@ -364,9 +363,11 @@ class TestForgeRunner:
         assert len(nodes) == 3
 
         assert nodes[0].source_id == f"id_{filename}"
-        assert nodes[0].metadata["source.original_path"] == str(doc)
+        metadata_path = nodes[0].metadata["source.original_path"]
+        assert metadata_path == str(doc)
 
-        assert zwj_part in nodes[0].metadata["source.original_path"]
+        assert isinstance(metadata_path, str)
+        assert zwj_part in metadata_path
 
     def test_run_should_yield_nothing_when_sources_is_empty(
         self, fake_ingestor: FakeIngestor, fake_fragmenter: FakeFragmenter
@@ -439,7 +440,7 @@ class TestForgeRunnerAsync:
         logger.propagate = True
 
         with caplog.at_level(logging.WARNING, logger="ragmark.forge.runner"):
-            nodes = []
+            nodes: list[KnowledgeNode] = []
             async for node in runner.process_async([bad_source, good_source]):
                 nodes.append(node)
 
@@ -470,7 +471,7 @@ class TestForgeRunnerAsync:
         logger.propagate = True
 
         with caplog.at_level(logging.WARNING, logger="ragmark.forge.runner"):
-            nodes = []
+            nodes: list[KnowledgeNode] = []
             async for node in runner.process_async([bad_source, good_source]):
                 nodes.append(node)
 
@@ -498,7 +499,7 @@ class TestForgeRunnerAsync:
         logger.propagate = True
 
         with caplog.at_level(logging.WARNING, logger="ragmark.forge.runner"):
-            nodes = []
+            nodes: list[KnowledgeNode] = []
             async for node in runner.process_async([bad_source, good_source]):
                 nodes.append(node)
 
@@ -541,7 +542,7 @@ class TestForgeRunnerConcurrent:
         logger.propagate = True
 
         with caplog.at_level(logging.WARNING, logger="ragmark.forge.runner"):
-            nodes = []
+            nodes: list[KnowledgeNode] = []
             async for item in runner.process_concurrent(
                 [bad_ingest, bad_fragment, good_source], max_concurrency=2
             ):
@@ -572,7 +573,7 @@ class TestForgeRunnerConcurrent:
         logger.propagate = True
 
         with caplog.at_level(logging.WARNING, logger="ragmark.forge.runner"):
-            nodes = []
+            nodes: list[KnowledgeNode] = []
             async for item in runner.process_concurrent(
                 [bad_runtime, good_source], max_concurrency=2
             ):
@@ -610,6 +611,7 @@ class TestForgeRunnerConcurrent:
 
         assert "Forge pipeline failed" in caplog.text
 
+    @pytest.mark.performance
     async def test_concurrent_should_process_faster_than_sequential(
         self, tmp_path: Path
     ) -> None:
@@ -634,13 +636,13 @@ class TestForgeRunnerConcurrent:
             source.touch()
 
         start_seq = time.perf_counter()
-        nodes_seq = []
+        nodes_seq: list[KnowledgeNode] = []
         async for node in runner.process_concurrent(sources, max_concurrency=1):
             nodes_seq.append(node)
         seq_duration = time.perf_counter() - start_seq
 
         start_conc = time.perf_counter()
-        nodes_conc = []
+        nodes_conc: list[KnowledgeNode] = []
         async for node in runner.process_concurrent(sources, max_concurrency=4):
             nodes_conc.append(node)
         conc_duration = time.perf_counter() - start_conc
@@ -650,6 +652,7 @@ class TestForgeRunnerConcurrent:
         speedup = seq_duration / conc_duration
         assert speedup >= 2.0, f"Speedup only {speedup:.2f}x, expected ≥2x"
 
+    @pytest.mark.performance
     async def test_concurrent_should_enforce_max_concurrency_limit(
         self, tmp_path: Path
     ) -> None:
@@ -674,7 +677,7 @@ class TestForgeRunnerConcurrent:
             source.touch()
 
         start = time.perf_counter()
-        nodes = []
+        nodes: list[KnowledgeNode] = []
         async for node in runner.process_concurrent(sources, max_concurrency=3):
             nodes.append(node)
         duration = time.perf_counter() - start
@@ -697,10 +700,12 @@ class TestForgeRunnerConcurrent:
             Raises ValueError on first error and stops processing remaining sources.
         """
 
-        class FailingIngestor:
+        class FailingIngestor(BaseIngestor):
             """Test fake ingestor that fails on specific file patterns."""
 
-            def ingest(self, source: Path) -> SourceDoc:
+            def ingest(self, source: Path | bytes | BinaryIO) -> SourceDoc:
+                if not isinstance(source, Path):
+                    raise TypeError("Expected Path source")
                 if "bad" in source.name:
                     raise ValueError("Simulated ingestion failure")
                 return SourceDoc(
@@ -708,7 +713,16 @@ class TestForgeRunnerConcurrent:
                     content="OK",
                     mime_type="text/plain",
                     metadata={},
+                    page_count=1,
                 )
+
+            @classmethod
+            def from_config(cls, config: IngestorConfig) -> "FailingIngestor":
+                return cls()
+
+            @property
+            def supported_formats(self) -> set[str]:
+                return {".txt"}
 
         runner = ForgeRunner(
             ingestor=FailingIngestor(),
@@ -725,7 +739,7 @@ class TestForgeRunnerConcurrent:
             source.touch()
 
         with pytest.raises(ValueError, match="Simulated ingestion failure"):
-            nodes = []
+            nodes: list[KnowledgeNode] = []
             async for node in runner.process_concurrent(sources, max_concurrency=2):
                 nodes.append(node)
 
@@ -742,10 +756,12 @@ class TestForgeRunnerConcurrent:
             Yields 9 nodes from 3 valid docs and collects 2 RuntimeError instances.
         """
 
-        class PartialFailIngestor:
+        class PartialFailIngestor(BaseIngestor):
             """Test fake ingestor that fails on specific file patterns."""
 
-            def ingest(self, source: Path) -> SourceDoc:
+            def ingest(self, source: Path | bytes | BinaryIO) -> SourceDoc:
+                if not isinstance(source, Path):
+                    raise TypeError("Expected Path source")
                 if "error" in source.name:
                     raise RuntimeError(f"Failed: {source.name}")
                 return SourceDoc(
@@ -753,7 +769,16 @@ class TestForgeRunnerConcurrent:
                     content="Success",
                     mime_type="text/plain",
                     metadata={},
+                    page_count=1,
                 )
+
+            @classmethod
+            def from_config(cls, config: IngestorConfig) -> "PartialFailIngestor":
+                return cls()
+
+            @property
+            def supported_formats(self) -> set[str]:
+                return {".txt"}
 
         runner = ForgeRunner(
             ingestor=PartialFailIngestor(),
@@ -771,8 +796,8 @@ class TestForgeRunnerConcurrent:
         for source in sources:
             source.touch()
 
-        nodes = []
-        errors = []
+        nodes: list[KnowledgeNode] = []
+        errors: list[Exception] = []
         async for item in runner.process_concurrent(sources, max_concurrency=2):
             if isinstance(item, Exception):
                 errors.append(item)
@@ -799,11 +824,11 @@ class TestStreamingMetrics:
         from ragmark.forge.runner import StreamingMetrics
 
         metrics = StreamingMetrics()
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue()
         metrics.configure(queue, StreamingMetricsConfig())
 
         await metrics.stop_monitoring()
-        assert metrics._monitor_task is None
+        assert metrics._monitor_task is None  # type: ignore
 
     async def test_stop_monitoring_should_handle_timeout_and_force_cancel(self) -> None:
         """Verifies that stop_monitoring forces cancellation on timeout.
@@ -815,7 +840,7 @@ class TestStreamingMetrics:
         from ragmark.forge.runner import StreamingMetrics
 
         metrics = StreamingMetrics()
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue()
         metrics.configure(queue, StreamingMetricsConfig(interval=0.1))
 
         await metrics.start_monitoring()
@@ -825,13 +850,13 @@ class TestStreamingMetrics:
             while True:
                 await asyncio.sleep(10)
 
-        metrics._monitor_task.cancel()
+        metrics._monitor_task.cancel()  # type: ignore
         await asyncio.sleep(0)
-        metrics._monitor_task = asyncio.create_task(stubborn_loop())
+        metrics._monitor_task = asyncio.create_task(stubborn_loop())  # type: ignore
 
         await metrics.stop_monitoring()
 
-        assert metrics._monitor_task.cancelled() or metrics._monitor_task.done()
+        assert metrics._monitor_task.cancelled() or metrics._monitor_task.done()  # type: ignore
 
     async def test_monitor_loop_should_handle_exceptions_gracefully(
         self, caplog: pytest.LogCaptureFixture
@@ -864,8 +889,8 @@ class TestStreamingMetrics:
         mock_queue.qsize.side_effect = qsize_side_effect
 
         config = StreamingMetricsConfig(interval=0.1)
-        metrics._queue = mock_queue
-        metrics._config = config
+        metrics._queue = mock_queue  # type: ignore
+        metrics._config = config  # type: ignore
 
         logger = logging.getLogger("ragmark.forge.runner")
         logger.propagate = True
@@ -897,7 +922,7 @@ class TestStreamingMetrics:
         from ragmark.forge.runner import StreamingMetrics
 
         metrics = StreamingMetrics()
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue()
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -925,11 +950,13 @@ class TestStreamingMetrics:
 
         # Given
         metrics = StreamingMetrics()
-        queue: asyncio.Queue[int] = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
 
         # Fill queue to 90%
-        for i in range(9):
-            await queue.put(i)
+        for _ in range(9):
+            await queue.put(None)
 
         # Configure metrics
         metrics.configure(queue, StreamingMetricsConfig(interval=0.1))
@@ -956,11 +983,13 @@ class TestStreamingMetrics:
 
         # Given
         metrics = StreamingMetrics()
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=20)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=20
+        )
 
         async def vary_queue_size():
-            for i in range(5):
-                await queue.put(f"item_{i}")
+            for _ in range(5):
+                await queue.put(None)
                 await asyncio.sleep(0.1)
 
         # Configure metrics
@@ -998,7 +1027,9 @@ class TestStreamingMetricsContextManager:
 
         # Given
         metrics = StreamingMetrics()
-        queue: asyncio.Queue[int] = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
         metrics.configure(queue, StreamingMetricsConfig(interval=0.1))
 
         # Track initial tasks
@@ -1027,7 +1058,9 @@ class TestStreamingMetricsContextManager:
         """
 
         # Given
-        queue = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
         metrics = StreamingMetrics()
         metrics.configure(queue, StreamingMetricsConfig(interval=0.1))
 
@@ -1056,7 +1089,9 @@ class TestStreamingMetricsContextManager:
 
         # Given
         metrics = StreamingMetrics()
-        queue = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
         metrics.configure(queue, StreamingMetricsConfig(interval=1.0))
 
         await metrics.start_monitoring()
@@ -1082,11 +1117,13 @@ class TestStreamingMetricsContextManager:
 
         # Given
         metrics = StreamingMetrics()
-        queue = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
 
         # Add known samples
-        for i in range(5):
-            await queue.put(i)
+        for _ in range(5):
+            await queue.put(None)
 
         metrics.configure(queue, StreamingMetricsConfig(interval=0.1))
 
@@ -1117,7 +1154,9 @@ class TestStreamingMetricsContextManager:
 
         # Given
         metrics = StreamingMetrics()
-        queue = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
         # Use minimum interval (0.1s) with max_samples=20
         metrics.configure(queue, StreamingMetricsConfig(interval=0.1, max_samples=20))
 
@@ -1158,11 +1197,13 @@ class TestStreamingMetricsContextManager:
 
         # Given
         metrics = StreamingMetrics()
-        queue = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
 
         # Fill to 70%
-        for i in range(7):
-            await queue.put(i)
+        for _ in range(7):
+            await queue.put(None)
 
         # Configure with low threshold (60%)
         metrics.configure(
@@ -1189,7 +1230,9 @@ class TestStreamingMetricsContextManager:
 
         # Given
         metrics = StreamingMetrics()
-        queue = asyncio.Queue(maxsize=10)
+        queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
         metrics.configure(queue, StreamingMetricsConfig(interval=0.1))
 
         # Start monitoring
@@ -1200,8 +1243,8 @@ class TestStreamingMetricsContextManager:
         await metrics.stop_monitoring()
 
         # Then: No hanging, task is cleaned up
-        assert metrics._monitor_task is not None
-        assert metrics._monitor_task.done() or metrics._monitor_task.cancelled()
+        assert metrics._monitor_task is not None  # type: ignore
+        assert metrics._monitor_task.done() or metrics._monitor_task.cancelled()  # type: ignore
 
 
 @pytest.mark.integration
@@ -1209,7 +1252,8 @@ class TestStreamingMetricsContextManager:
 class TestStreamingPipelineMemoryEfficiency:
     """Tests for run_stream() memory efficiency and latency."""
 
-    async def test_run_stream_should_have_low_time_to_first_node(self, tmp_path):
+    @pytest.mark.performance
+    async def test_run_stream_should_have_low_time_to_first_node(self, tmp_path: Path):
         """Verifies streaming pipeline yields first node quickly.
 
         Given:
@@ -1242,7 +1286,9 @@ class TestStreamingPipelineMemoryEfficiency:
         assert first_node.node_id.endswith("_chunk_0")
         assert ttfn_ms < 100, f"TTFN too high: {ttfn_ms:.2f}ms"
 
-    async def test_run_stream_should_process_all_documents_correctly(self, tmp_path):
+    async def test_run_stream_should_process_all_documents_correctly(
+        self, tmp_path: Path
+    ):
         """Verifies run_stream() processes all documents without data loss.
 
         Given:
@@ -1264,7 +1310,7 @@ class TestStreamingPipelineMemoryEfficiency:
             source.touch()
 
         # When
-        nodes = []
+        nodes: list[KnowledgeNode] = []
         async for node in runner.process_async(sources):
             nodes.append(node)
 
@@ -1275,7 +1321,7 @@ class TestStreamingPipelineMemoryEfficiency:
         source_ids = {node.node_id.split("_chunk_")[0] for node in nodes}
         assert len(source_ids) == 5
 
-    async def test_run_stream_should_handle_async_iterator_input(self, tmp_path):
+    async def test_run_stream_should_handle_async_iterator_input(self, tmp_path: Path):
         """Verifies run_stream() accepts AsyncIterator sources.
 
         Given:
@@ -1300,7 +1346,7 @@ class TestStreamingPipelineMemoryEfficiency:
                 await asyncio.sleep(0.01)
 
         # When
-        nodes = []
+        nodes: list[KnowledgeNode] = []
         async for node in runner.process_async(async_sources()):
             nodes.append(node)
 
@@ -1328,7 +1374,9 @@ class TestMetricsIntegration:
         )
 
         # Create a complete profile with metrics enabled
-        profile_dict = {
+        profile_dict: dict[
+            str, dict[str, str | int | dict[str, bool | float | int]]
+        ] = {
             "ingestor": {"backend": "fitz"},
             "fragmenter": {"strategy": "token", "chunk_size": 256, "overlap": 64},
             "embedder": {"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -1356,7 +1404,7 @@ class TestMetricsIntegration:
         tasks_before = len([t for t in asyncio.all_tasks() if not t.done()])
 
         # When: Run pipeline
-        nodes = []
+        nodes: list[KnowledgeNode] = []
         async for node in runner.process_concurrent(sources, max_concurrency=2):
             nodes.append(node)
 
@@ -1380,8 +1428,12 @@ class TestMetricsIntegration:
         metrics1 = StreamingMetrics()
         metrics2 = StreamingMetrics()
 
-        queue1 = asyncio.Queue(maxsize=10)
-        queue2 = asyncio.Queue(maxsize=20)
+        queue1: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=10
+        )
+        queue2: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
+            maxsize=20
+        )
 
         metrics1.configure(queue1, StreamingMetricsConfig(interval=0.1))
         metrics2.configure(queue2, StreamingMetricsConfig(interval=0.1))

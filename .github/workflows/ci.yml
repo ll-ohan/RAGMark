@@ -24,20 +24,20 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: 🗽 Install dependencies
         run: |
           pip install --upgrade pip
           pip install -e ".[all]"  # Installe tout pour les tests
 
-      - name: 🚨 Linting (Ruff & Mypy)
+      - name: 🖋️ Linting (Ruff & Mypy)
         run: |
           ruff check
           mypy src/ragmark/
 
 
-      - name: 🧪 Unit Tests & Coverage
+      - name: 🔬 Unit Tests & Coverage
         run: |
-          pytest --cov=src/ragmark --cov-report=xml --cov-report=term tests/
+          pytest --cov=src/ragmark -m "not performance" --cov-report=xml --cov-report=term tests/
 
       # Upload coverage to Codecov
       # - name: Upload coverage

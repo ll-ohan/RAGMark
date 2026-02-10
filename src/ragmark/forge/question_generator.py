@@ -10,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -18,8 +18,13 @@ from ragmark.exceptions import QuestionGenerationError
 from ragmark.generation.drivers import BaseLLMDriver, LlamaCppDriver
 from ragmark.generation.prompts import PromptTemplate
 from ragmark.logger import get_logger
-from ragmark.schemas.documents import KnowledgeNode
-from ragmark.schemas.qa import BatchQAOutput, SyntheticQA
+from ragmark.schemas.documents import KnowledgeNode, MetadataDict
+from ragmark.schemas.qa import (
+    BatchQAOutput,
+    SyntheticQA,
+    SyntheticQAMetadata,
+    SyntheticQAPairData,
+)
 
 if TYPE_CHECKING:
     from ragmark.config.profile import QuestionGeneratorConfig
@@ -312,7 +317,7 @@ class LLMQuestionGenerator(BaseQuestionGenerator):
 
             qa_pairs_by_node = self._parse_batch_qa(result.text, len(nodes))
 
-            enriched = []
+            enriched: list[KnowledgeNode] = []
             total_parsed = 0
             total_validated = 0
 
@@ -395,6 +400,7 @@ class LLMQuestionGenerator(BaseQuestionGenerator):
         Raises:
             QuestionGenerationError: If JSON parsing or validation fails.
         """
+        json_data: dict[str, Any] = {}
         try:
             # Parse JSON with error handling
             json_data = json.loads(generated_text)
@@ -456,15 +462,25 @@ class LLMQuestionGenerator(BaseQuestionGenerator):
         Returns:
             Node with synthetic_qa metadata.
         """
-        enriched_metadata = {
+        qa_pairs_payload: list[SyntheticQAPairData] = []
+        for qa in qa_pairs:
+            qa_data: SyntheticQAPairData = {
+                "question": qa.question,
+                "answer": qa.answer,
+            }
+            if qa.confidence is not None:
+                qa_data["confidence"] = qa.confidence
+            qa_pairs_payload.append(qa_data)
+        synthetic_qa: SyntheticQAMetadata = {
+            "qa_pairs": qa_pairs_payload,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "num_questions_requested": self._num_questions,
+            "num_questions_validated": len(qa_pairs),
+            "batch_id": batch_id,
+        }
+        enriched_metadata: MetadataDict = {
             **node.metadata,
-            "synthetic_qa": {
-                "qa_pairs": [qa.model_dump() for qa in qa_pairs],
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "num_questions_requested": self._num_questions,
-                "num_questions_validated": len(qa_pairs),
-                "batch_id": batch_id,
-            },
+            "synthetic_qa": synthetic_qa,
         }
 
         return node.model_copy(update={"metadata": enriched_metadata})

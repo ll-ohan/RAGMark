@@ -141,7 +141,7 @@ class ContextManager:
         Returns:
             Prefix of chunks fitting within token budget.
         """
-        selected = []
+        selected: list[str] = []
         used_tokens = 0
 
         for chunk in chunks:
@@ -177,7 +177,7 @@ class ContextManager:
         if not chunks:
             return []
 
-        first_half = []
+        first_half: list[str] = []
         last_half: deque[str] = deque()
         used_tokens = 0
 
@@ -244,7 +244,7 @@ class ContextManager:
         Returns:
             Highest priority chunks fitting within token budget.
         """
-        selected = []
+        selected: list[str] = []
         used_tokens = 0
 
         for chunk in chunks:

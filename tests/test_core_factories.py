@@ -10,7 +10,11 @@ from ragmark.config.profile import EmbedderConfig, IndexConfig, RetrievalConfig
 from ragmark.exceptions import UnsupportedBackendError
 from ragmark.index.base import VectorIndex
 from ragmark.index.embedders import BaseEmbedder, EmbedderFactory
-from ragmark.index.factory import _INDEX_REGISTRY, IndexFactory, register_index_backend
+from ragmark.index.factory import (
+    _INDEX_REGISTRY,  # type: ignore[import]
+    IndexFactory,
+    register_index_backend,
+)
 from ragmark.retrieval.factory import RetrieverFactory
 from ragmark.retrieval.strategies import (
     DenseRetriever,
@@ -62,7 +66,7 @@ class FakeVectorIndex(VectorIndex):
     ) -> "FakeVectorIndex":
         return cls(config=config, embedder=embedder)
 
-    async def add(self, nodes: list[KnowledgeNode]) -> None:
+    async def add(self, nodes: list[KnowledgeNode], monitoring: Any = None) -> None:
         pass
 
     async def search(

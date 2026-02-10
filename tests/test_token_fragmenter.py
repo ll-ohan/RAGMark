@@ -27,7 +27,7 @@ class TestTokenFragmenter:
         """
         fragmenter = TokenFragmenter()
         assert fragmenter.chunk_size == 256
-        assert fragmenter._tokenizer_name == "cl100k_base"
+        assert fragmenter._tokenizer_name == "cl100k_base"  # type: ignore
 
     def test_fragment_real_content_continuity(
         self, doc_factory: Callable[..., SourceDoc]
@@ -69,7 +69,6 @@ class TestTokenFragmenter:
         assert len(nodes) >= 2
         assert set(n.source_id for n in nodes) == {"d1", "d2"}
 
-    @pytest.mark.rag_edge_case
     def test_unicode_complex_graphemes(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -93,7 +92,6 @@ class TestTokenFragmenter:
         assert reconstructed == text
         assert "👨‍👩‍👧‍👦" in reconstructed
 
-    @pytest.mark.rag_edge_case
     def test_normalization_drift_forced(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -133,7 +131,6 @@ class TestTokenFragmenter:
             assert nodes[0].content == nfd_text
             assert len(nodes[0].content) == 5
 
-    @pytest.mark.rag_edge_case
     def test_drift_exceeds_search_window(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -153,7 +150,6 @@ class TestTokenFragmenter:
         assert reconstructed == text
         assert len(nodes) > 1
 
-    @pytest.mark.rag_edge_case
     def test_null_bytes_handling(self, doc_factory: Callable[..., SourceDoc]) -> None:
         """
         Given text containing null bytes.
@@ -169,7 +165,6 @@ class TestTokenFragmenter:
         assert len(nodes) == 1
         assert nodes[0].content == "Data\x00Preserved"
 
-    @pytest.mark.rag_edge_case
     def test_invalid_tokenizer_config(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -186,7 +181,6 @@ class TestTokenFragmenter:
 
         assert "Unknown encoding" in str(exc_info.value)
 
-    @pytest.mark.rag_edge_case
     def test_missing_tiktoken_dependency(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -200,7 +194,7 @@ class TestTokenFragmenter:
 
         with patch.dict(sys.modules, {"tiktoken": None}):
             with pytest.raises(FragmentationError) as exc_info:
-                fragmenter._encoding = None
+                fragmenter._encoding = None  # type: ignore
                 fragmenter.fragment(doc)
 
         assert "tiktoken not installed" in str(exc_info.value)
@@ -275,7 +269,6 @@ class TestTokenFragmenter:
             assert lazy.metadata["token_count"] == listed.metadata["token_count"]
             assert lazy.metadata["chunk_index"] == listed.metadata["chunk_index"]
 
-    @pytest.mark.rag_edge_case
     def test_fragment_lazy_handles_unicode_normalization_drift(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:

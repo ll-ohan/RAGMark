@@ -98,7 +98,6 @@ class TestStringPromptTemplate:
 
         assert result == "(No context available)"
 
-    @pytest.mark.rag_edge_case
     @pytest.mark.unit
     def test_format_context_should_handle_complex_unicode_and_normalization(
         self, node_factory: Callable[..., KnowledgeNode]
@@ -177,7 +176,6 @@ class TestStringPromptTemplate:
         assert template.template_str == template_content
         assert template.format(name="User") == "Hello User, welcome to RAGMark."
 
-    @pytest.mark.rag_edge_case
     @pytest.mark.integration
     def test_from_file_should_raise_error_when_file_missing(
         self, tmp_path: Path
@@ -196,7 +194,6 @@ class TestStringPromptTemplate:
         with pytest.raises(FileNotFoundError):
             StringPromptTemplate.from_file(missing_file, input_variables=[])
 
-    @pytest.mark.rag_edge_case
     @pytest.mark.unit
     def test_format_should_wrap_value_error_with_original_cause(self) -> None:
         """Verify that ValueError (e.g. format spec mismatch) is wrapped properly.

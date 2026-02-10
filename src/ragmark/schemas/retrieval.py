@@ -4,8 +4,6 @@ Defines data structures for representing search results, retrieved nodes,
 and retrieval trace contexts.
 """
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from ragmark.schemas.documents import KnowledgeNode
@@ -75,8 +73,8 @@ class TraceContext(BaseModel):
         default_factory=list[RetrievedNode],
         description="Retrieved and ranked nodes",
     )
-    retrieval_metadata: dict[str, Any] = Field(
-        default_factory=dict,
+    retrieval_metadata: dict[str, str | float | int] = Field(
+        default_factory=dict[str, str | float | int],
         description="Metadata about the retrieval process (timing, strategy, etc.)",
     )
     reranked: bool = Field(False, description="Whether reranking was applied")

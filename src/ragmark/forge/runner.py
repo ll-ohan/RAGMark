@@ -9,7 +9,7 @@ import time
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ragmark.config.profile import ExperimentProfile, StreamingMetricsConfig
 from ragmark.forge.factory import (
@@ -19,9 +19,10 @@ from ragmark.forge.factory import (
 )
 from ragmark.forge.fragmenters import BaseFragmenter
 from ragmark.forge.ingestors import BaseIngestor
-from ragmark.forge.metrics import BaseMetricsCollector
 from ragmark.forge.question_generator import BaseQuestionGenerator
 from ragmark.logger import get_logger
+from ragmark.metrics.base import MonitoringMetric
+from ragmark.metrics.reporting import export_monitoring_summary
 from ragmark.schemas.documents import KnowledgeNode
 
 logger = get_logger(__name__)
@@ -48,6 +49,7 @@ class ForgeRunner:
         fail_fast: bool = True,
         profile: ExperimentProfile | None = None,
         question_generator: BaseQuestionGenerator | None = None,
+        monitoring: MonitoringMetric | None = None,
     ):
         """Initialize the forge runner.
 
@@ -57,12 +59,14 @@ class ForgeRunner:
             fail_fast: Whether to stop on first error or continue.
             profile: Optional experiment profile for metrics configuration.
             question_generator: Optional question generator for synthetic QA.
+            monitoring: Optional monitoring orchestrator.
         """
         self.ingestor = ingestor
         self.fragmenter = fragmenter
         self.fail_fast = fail_fast
         self.profile = profile
         self.question_generator = question_generator
+        self.monitoring = monitoring
 
     def _handle_document_error(
         self,
@@ -186,21 +190,35 @@ class ForgeRunner:
                 profile.question_generator
             )
 
+        monitoring = None
+        if (
+            profile.metrics
+            and profile.metrics.monitoring
+            and profile.metrics.monitoring.enabled
+        ):
+            monitoring = MonitoringMetric(enabled=True)
+
         return cls(
             ingestor=ingestor,
             fragmenter=fragmenter,
             fail_fast=profile.fail_fast,
             profile=profile,
             question_generator=question_generator,
+            monitoring=monitoring,
         )
 
-    def process(self, sources: list[Path]) -> list[KnowledgeNode]:
+    def process(
+        self,
+        sources: list[Path],
+        monitoring: MonitoringMetric | None = None,
+    ) -> list[KnowledgeNode]:
         """Process documents and return all knowledge nodes in memory.
 
         Suitable for small to medium document sets where memory is not constrained.
 
         Args:
             sources: Source file paths.
+            monitoring: Optional monitoring orchestrator.
 
         Returns:
             All generated knowledge nodes.
@@ -209,9 +227,13 @@ class ForgeRunner:
             IngestionError: If ingestion fails (when fail_fast=True).
             FragmentationError: If fragmentation fails (when fail_fast=True).
         """
-        return list(self.process_iter(sources))
+        return list(self.process_iter(sources, monitoring=monitoring))
 
-    def process_iter(self, sources: Iterable[Path]) -> Iterator[KnowledgeNode]:
+    def process_iter(
+        self,
+        sources: Iterable[Path],
+        monitoring: MonitoringMetric | None = None,
+    ) -> Iterator[KnowledgeNode]:
         """Process documents with streaming output (O(1) memory per node).
 
         Error handling respects fail_fast mode:
@@ -220,6 +242,7 @@ class ForgeRunner:
 
         Args:
             sources: Source file paths.
+            monitoring: Optional monitoring orchestrator.
 
         Yields:
             Knowledge nodes as generated.
@@ -237,18 +260,30 @@ class ForgeRunner:
 
         logger.info("Starting Forge pipeline")
 
+        monitor = monitoring or self.monitoring
+
         for i, source in enumerate(sources):
             self._log_progress(i, doc_count, node_count)
 
             try:
                 logger.debug("Ingesting document: source=%s", source)
-                doc = self.ingestor.ingest(source)
+                if monitor:
+                    with monitor.stage("parsing"):
+                        doc = self.ingestor.ingest(source)
+                else:
+                    doc = self.ingestor.ingest(source)
                 doc_count += 1
 
                 logger.debug("Fragmenting document: source=%s", source)
-                for node in self.fragmenter.fragment_lazy(doc):
-                    yield node
-                    node_count += 1
+                if monitor:
+                    with monitor.stage("chunking"):
+                        for node in self.fragmenter.fragment_lazy(doc):
+                            yield node
+                            node_count += 1
+                else:
+                    for node in self.fragmenter.fragment_lazy(doc):
+                        yield node
+                        node_count += 1
 
             except (IngestionError, FragmentationError) as e:
                 error_count += 1
@@ -263,9 +298,12 @@ class ForgeRunner:
                     continue
 
         self._log_completion(start_time, doc_count, node_count, error_count, "sync")
+        export_monitoring_summary(monitor, artifact_prefix="forge")
 
     async def process_async(
-        self, sources: AsyncIterator[Path] | Iterable[Path]
+        self,
+        sources: AsyncIterator[Path] | Iterable[Path],
+        monitoring: MonitoringMetric | None = None,
     ) -> AsyncIterator[KnowledgeNode]:
         """Process documents with async streaming (O(1) memory, non-blocking I/O).
 
@@ -274,6 +312,7 @@ class ForgeRunner:
 
         Args:
             sources: Source file paths as async or sync iterable.
+            monitoring: Optional monitoring orchestrator.
 
         Yields:
             Knowledge nodes as generated, optionally enriched with synthetic QA.
@@ -295,6 +334,8 @@ class ForgeRunner:
         qa_enriched_count = 0
         error_count = 0
 
+        monitor = monitoring or self.monitoring
+
         logger.info(
             "Starting async Forge pipeline with QA generation=%s",
             bool(self.question_generator),
@@ -312,13 +353,21 @@ class ForgeRunner:
                 try:
                     logger.debug("Ingesting document: source=%s", source)
 
-                    doc = await asyncio.to_thread(self.ingestor.ingest, source)
+                    if monitor:
+                        async with monitor.stage("parsing"):
+                            doc = await asyncio.to_thread(self.ingestor.ingest, source)
+                    else:
+                        doc = await asyncio.to_thread(self.ingestor.ingest, source)
                     doc_count += 1
 
                     logger.debug("Fragmenting document: source=%s", source)
-
-                    for node in self.fragmenter.fragment_lazy(doc):
-                        yield node
+                    if monitor:
+                        async with monitor.stage("chunking"):
+                            for node in self.fragmenter.fragment_lazy(doc):
+                                yield node
+                    else:
+                        for node in self.fragmenter.fragment_lazy(doc):
+                            yield node
 
                 except (IngestionError, FragmentationError) as e:
                     error_count += 1
@@ -343,11 +392,19 @@ class ForgeRunner:
                     node_stream(), batch_size=batch_size
                 )
 
-                async for enriched_node in enriched_stream:
-                    if "synthetic_qa" in enriched_node.metadata:
-                        qa_enriched_count += 1
-                    yield enriched_node
-                    node_count += 1
+                if monitor:
+                    async with monitor.stage("qa_generation"):
+                        async for enriched_node in enriched_stream:
+                            if "synthetic_qa" in enriched_node.metadata:
+                                qa_enriched_count += 1
+                            yield enriched_node
+                            node_count += 1
+                else:
+                    async for enriched_node in enriched_stream:
+                        if "synthetic_qa" in enriched_node.metadata:
+                            qa_enriched_count += 1
+                        yield enriched_node
+                        node_count += 1
 
             except QuestionGenerationError as e:
                 error_count += 1
@@ -369,9 +426,13 @@ class ForgeRunner:
             time.time() - start_time,
             error_count,
         )
+        export_monitoring_summary(monitor, artifact_prefix="forge_async")
 
     async def process_concurrent(
-        self, sources: Iterable[Path], max_concurrency: int = 4
+        self,
+        sources: Iterable[Path],
+        max_concurrency: int = 4,
+        monitoring: MonitoringMetric | None = None,
     ) -> AsyncIterator[KnowledgeNode]:
         """Process documents with concurrent ingestion (3-5x speedup, bounded memory).
 
@@ -381,6 +442,7 @@ class ForgeRunner:
         Args:
             sources: Source file paths.
             max_concurrency: Worker pool size.
+            monitoring: Optional monitoring orchestrator.
 
         Yields:
             Knowledge nodes as generated.
@@ -400,6 +462,7 @@ class ForgeRunner:
             "Starting concurrent Forge pipeline: max_concurrency=%d", max_concurrency
         )
 
+        monitor = monitoring or self.monitoring
         semaphore = asyncio.Semaphore(max_concurrency)
 
         queue: asyncio.Queue[KnowledgeNode | Exception | None] = asyncio.Queue(
@@ -421,12 +484,21 @@ class ForgeRunner:
                 try:
                     logger.debug("Ingesting document: source=%s", source)
 
-                    doc = await asyncio.to_thread(self.ingestor.ingest, source)
+                    if monitor:
+                        async with monitor.stage("parsing"):
+                            doc = await asyncio.to_thread(self.ingestor.ingest, source)
+                    else:
+                        doc = await asyncio.to_thread(self.ingestor.ingest, source)
                     doc_count += 1
 
                     logger.debug("Fragmenting document: source=%s", source)
-                    for node in self.fragmenter.fragment_lazy(doc):
-                        await queue.put(node)
+                    if monitor:
+                        async with monitor.stage("chunking"):
+                            for node in self.fragmenter.fragment_lazy(doc):
+                                await queue.put(node)
+                    else:
+                        for node in self.fragmenter.fragment_lazy(doc):
+                            await queue.put(node)
 
                 except (IngestionError, FragmentationError) as e:
                     error_count += 1
@@ -482,11 +554,13 @@ class ForgeRunner:
                     # We don't increment node_count for errors.
                 else:
                     node_count += 1
-                    yield item
+
+                yield cast(KnowledgeNode, item)
 
         self._log_completion(
             start_time, doc_count, node_count, error_count, "concurrent"
         )
+        export_monitoring_summary(monitor, artifact_prefix="forge_concurrent")
 
     async def _to_async_iter(
         self, sources: AsyncIterator[Path] | Iterable[Path]
@@ -507,7 +581,7 @@ class ForgeRunner:
                 yield source
 
 
-class StreamingMetrics(BaseMetricsCollector):
+class StreamingMetrics(MonitoringMetric):
     """Metrics tracker for streaming pipeline health.
 
     Monitor queue sizes to detect backpressure when consumers fall behind
@@ -523,6 +597,7 @@ class StreamingMetrics(BaseMetricsCollector):
 
         Call configure() before entering context manager.
         """
+        super().__init__(enabled=True)
         self.queue_size_samples: list[int] = []
         self.backpressure_events: int = 0
         self._shutdown_flag: asyncio.Event | None = None

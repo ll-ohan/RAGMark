@@ -124,10 +124,9 @@ markers = [
     "unit: marks pure logic tests without I/O (mocks allowed for network only)",
     "integration: marks tests requiring external infrastructure (Docker services)",
     "slow: marks tests with heavy I/O or large data processing (excluded from pre-commit)",
-    "rag_edge_case: marks tests focusing on Unicode, null vectors, or NFC/NFD normalization",
     "concurrency: marks tests for race conditions and concurrent access",
+    "performance: marks tests for performance validating O(1) complexity and timing constraints",
     "gpu: marks tests requiring GPU acceleration (CUDA)",
-    "benchmark: marks performance benchmark tests validating O(1) complexity and timing constraints",
 ]
 
 [tool.mypy]

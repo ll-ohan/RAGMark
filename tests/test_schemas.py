@@ -73,7 +73,6 @@ class TestSourceDoc:
 
         assert "Content cannot be empty" in str(exc_info.value)
 
-    @pytest.mark.rag_edge_case
     def test_source_doc_should_preserve_complex_graphemes(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -92,7 +91,6 @@ class TestSourceDoc:
         assert doc.content == content
 
     @pytest.mark.unit
-    @pytest.mark.rag_edge_case
     def test_source_doc_should_handle_mixed_unicode_normalization(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -113,7 +111,6 @@ class TestSourceDoc:
         assert nfd_text in doc.content
 
     @pytest.mark.unit
-    @pytest.mark.rag_edge_case
     def test_source_doc_should_reject_bom_in_content(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -130,7 +127,6 @@ class TestSourceDoc:
         assert doc.content == content_with_bom
 
     @pytest.mark.unit
-    @pytest.mark.rag_edge_case
     def test_source_doc_should_handle_ideographic_whitespace(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -316,6 +312,7 @@ class TestKnowledgeNode:
         assert "word_count" in node.metadata
         assert node.metadata["word_count"] == 4
         assert "created_at" in node.metadata
+        assert isinstance(node.metadata["created_at"], str)
         created_at = datetime.fromisoformat(node.metadata["created_at"])
         assert created_at.tzinfo == timezone.utc
 
@@ -399,7 +396,6 @@ class TestKnowledgeNode:
 
         assert node.sparse_vector == sparse_vec
 
-    @pytest.mark.rag_edge_case
     def test_knowledge_node_should_preserve_unicode_in_content(self) -> None:
         """
         Given: A KnowledgeNode with complex Unicode content.
@@ -429,7 +425,7 @@ class TestKnowledgeNode:
         When: Pydantic validates the strict model.
         Then: A ValidationError must be raised.
         """
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "content": "Test",
             "source_id": "src-001",
             "position": NodePosition(start_char=0, end_char=4, page=1, section="Intro"),
@@ -527,7 +523,7 @@ class TestVectorPayload:
         When: Pydantic validates the strict model.
         Then: A ValidationError must be raised.
         """
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "node_id": "node-999",
             "dense_vector": [0.1],
             "content": "Test",
@@ -655,7 +651,7 @@ class TestTokenUsage:
         When: Pydantic validates the strict model.
         Then: A ValidationError is raised.
         """
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "prompt_tokens": 100,
             "completion_tokens": 50,
             "total_tokens": 150,
@@ -736,7 +732,7 @@ class TestGenerationResult:
         When: The GenerationResult is validated.
         Then: A ValidationError is raised.
         """
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "text": "Test",
             "usage": TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
             "finish_reason": "timeout",
@@ -793,7 +789,7 @@ class TestGenerationResult:
         Then: A ValidationError is raised.
         """
 
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "text": "Test",
             "usage": TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
             "finish_reason": "stop",
@@ -1233,7 +1229,7 @@ class TestCaseResult:
         Then: A ValidationError is raised.
         """
 
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "case_id": "case-999",
             "trace": trace_factory(),
             "predicted_answer": "Some answer",
@@ -1366,7 +1362,7 @@ class TestSystemInfo:
         Then: A ValidationError is raised.
         """
 
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "python_version": "3.10.0",
             "ragmark_version": "0.1.0",
             "platform": "Test",
@@ -1619,7 +1615,7 @@ class TestAuditReport:
         Then: A ValidationError is raised.
         """
 
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "experiment_profile_hash": "hash",
             "duration_seconds": 100.0,
             "system_info": SystemInfo(
@@ -1715,7 +1711,7 @@ class TestSearchResult:
         Then: A ValidationError is raised with explicit message.
         """
 
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "node_id": "node-999",
             "score": 0.8,
             "extra_field": "invalid",
@@ -1837,7 +1833,7 @@ class TestRetrievedNode:
         Then: A ValidationError is raised.
         """
 
-        invalid_data = {
+        invalid_data: dict[str, Any] = {
             "node": node_factory(),
             "score": 0.9,
             "rank": 1,

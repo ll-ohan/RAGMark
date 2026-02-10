@@ -357,6 +357,7 @@ class EvaluationConfig(BaseModel):
 
     Attributes:
         metrics: List of metrics to compute.
+        metric_parameters: Parameters for parameterized metrics.
         trial_cases_path: Path to trial cases file.
         judge_model_path: Optional path to judge LLM for generation metrics.
     """
@@ -382,6 +383,13 @@ class EvaluationConfig(BaseModel):
             ["recall@k", "mrr"],
         ),
         description="Metrics to compute",
+    )
+    metric_parameters: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Metric parameters keyed by base name. "
+            "Example: {'recall': {'k': 10}, 'precision': {'ks': [5, 10]}}"
+        ),
     )
     trial_cases_path: Path = Field(
         ...,
@@ -429,15 +437,35 @@ class StreamingMetricsConfig(BaseModel):
     )
 
 
+class MonitoringMetricsConfig(BaseModel):
+    """Configuration for monitoring metrics.
+
+    Attributes:
+        enabled: Whether to enable monitoring metrics.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable monitoring metrics",
+    )
+
+
 class MetricsConfig(BaseModel):
     """Configuration for metrics collection.
 
     Attributes:
+        monitoring: Pipeline monitoring metrics settings.
         streaming: Streaming pipeline metrics settings.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
+    monitoring: MonitoringMetricsConfig | None = Field(
+        default_factory=lambda: MonitoringMetricsConfig(enabled=False),
+        description="Monitoring metrics configuration",
+    )
     streaming: StreamingMetricsConfig | None = Field(
         default_factory=StreamingMetricsConfig,
         description="Streaming pipeline metrics configuration",
@@ -543,7 +571,7 @@ class ExperimentProfile(BaseModel):
                 k: ExperimentProfile._resolve_paths(v, base_dir)
                 for k, v in cast(dict[str, Any], data).items()
             }
-        elif isinstance(data, list):
+        elif type(data) is list[Any]:
             return [ExperimentProfile._resolve_paths(item, base_dir) for item in data]
         elif isinstance(data, str):
             is_path = data.startswith(("./", "../", "/", "~", "\\")) or data.endswith(
@@ -572,7 +600,7 @@ class ExperimentProfile(BaseModel):
                     k: convert_paths_to_str(v)
                     for k, v in cast(dict[str, Any], obj).items()
                 }
-            elif isinstance(obj, list):
+            elif type(obj) is list[Any]:
                 return [convert_paths_to_str(item) for item in obj]
             return obj
 

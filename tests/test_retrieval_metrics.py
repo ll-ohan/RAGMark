@@ -4,19 +4,50 @@ This module tests the standard information retrieval metrics used to evaluate
 RAG system retrieval quality.
 """
 
+from typing import Any, cast
+
 import pytest
 
-from ragmark.evaluation.retrieval_metrics import (
-    compute_retrieval_metrics,
-    map_at_k,
-    mrr,
-    ndcg_at_k,
-    precision_at_k,
-    recall_at_k,
-)
+from ragmark.metrics import MetricRegistry, compute_retrieval_metrics
+from ragmark.metrics.base import EvaluationMetric
 from ragmark.schemas.documents import KnowledgeNode, NodePosition
 from ragmark.schemas.evaluation import CaseResult
 from ragmark.schemas.retrieval import RetrievedNode, TraceContext
+
+
+# Test wrappers using MetricRegistry - for backward compatibility with tests
+def recall_at_k(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
+    """Test wrapper for recall@k using MetricRegistry."""
+    metric = cast(
+        EvaluationMetric[Any, float], MetricRegistry.create(f"recall@{k}", k=k)
+    )
+    return metric.compute(retrieved_ids=retrieved_ids, relevant_ids=relevant_ids)
+
+
+def precision_at_k(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
+    """Test wrapper for precision@k using MetricRegistry."""
+    metric = cast(
+        EvaluationMetric[Any, float], MetricRegistry.create(f"precision@{k}", k=k)
+    )
+    return metric.compute(retrieved_ids=retrieved_ids, relevant_ids=relevant_ids)
+
+
+def mrr(retrieved_ids: list[str], relevant_ids: list[str]) -> float:
+    """Test wrapper for MRR using MetricRegistry."""
+    metric = cast(EvaluationMetric[Any, float], MetricRegistry.create("mrr"))
+    return metric.compute(retrieved_ids=retrieved_ids, relevant_ids=relevant_ids)
+
+
+def ndcg_at_k(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
+    """Test wrapper for NDCG@k using MetricRegistry."""
+    metric = cast(EvaluationMetric[Any, float], MetricRegistry.create(f"ndcg@{k}", k=k))
+    return metric.compute(retrieved_ids=retrieved_ids, relevant_ids=relevant_ids)
+
+
+def map_at_k(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
+    """Test wrapper for MAP@k using MetricRegistry."""
+    metric = cast(EvaluationMetric[Any, float], MetricRegistry.create(f"map@{k}", k=k))
+    return metric.compute(retrieved_ids=retrieved_ids, relevant_ids=relevant_ids)
 
 
 @pytest.mark.unit
@@ -84,7 +115,7 @@ class TestRecallAtK:
         Then:
             Score is 0.0.
         """
-        retrieved = []
+        retrieved: list[str] = []
         relevant = ["a", "b", "c"]
 
         score = recall_at_k(retrieved, relevant, k=5)
@@ -101,8 +132,8 @@ class TestRecallAtK:
         Then:
             Score is 0.0 (undefined case, return 0).
         """
-        retrieved = ["a", "b", "c"]
-        relevant = []
+        retrieved: list[str] = ["a", "b", "c"]
+        relevant: list[str] = []
 
         score = recall_at_k(retrieved, relevant, k=5)
 
@@ -191,7 +222,7 @@ class TestPrecisionAtK:
         Then:
             Score is 0.0.
         """
-        retrieved = []
+        retrieved: list[str] = []
         relevant = ["a", "b", "c"]
 
         score = precision_at_k(retrieved, relevant, k=5)
@@ -281,8 +312,8 @@ class TestMRR:
         Then:
             Score is 0.0.
         """
-        retrieved = []
-        relevant = ["a"]
+        retrieved: list[str] = []
+        relevant: list[str] = ["a"]
 
         score = mrr(retrieved, relevant)
 
@@ -354,8 +385,8 @@ class TestNDCGAtK:
         Then:
             Score is 0.0.
         """
-        retrieved = []
-        relevant = ["a"]
+        retrieved: list[str] = []
+        relevant: list[str] = ["a"]
 
         score = ndcg_at_k(retrieved, relevant, k=5)
 
@@ -427,8 +458,8 @@ class TestMAPAtK:
         Then:
             Score is 0.0.
         """
-        retrieved = []
-        relevant = ["a"]
+        retrieved: list[str] = []
+        relevant: list[str] = ["a"]
 
         score = map_at_k(retrieved, relevant, k=5)
 
@@ -442,13 +473,17 @@ class TestComputeRetrievalMetrics:
     @pytest.fixture
     def sample_nodes(self) -> list[KnowledgeNode]:
         """Create sample KnowledgeNode fixtures for testing."""
-        nodes = []
+        nodes: list[KnowledgeNode] = []
         for i in range(5):
             node = KnowledgeNode(
                 node_id=f"node_{i}",
                 content=f"Content {i}",
                 source_id="source_1",
-                position=NodePosition(start_char=0, end_char=100),
+                position=NodePosition(
+                    start_char=0, end_char=100, page=1, section="section"
+                ),
+                dense_vector=[0.1 * i, 0.2 * i],
+                sparse_vector={0: 0.3 * i, 1: 0.4 * i},
             )
             nodes.append(node)
         return nodes
@@ -460,6 +495,8 @@ class TestComputeRetrievalMetrics:
         """Create sample CaseResult fixtures with realistic retrieval traces."""
         case_result_1 = CaseResult(
             case_id="case_1",
+            predicted_answer="Sample answer for case 1",
+            generation_result=None,
             trace=TraceContext(
                 query="test query 1",
                 retrieved_nodes=[
@@ -473,6 +510,8 @@ class TestComputeRetrievalMetrics:
 
         case_result_2 = CaseResult(
             case_id="case_2",
+            predicted_answer="Sample answer for case 2",
+            generation_result=None,
             trace=TraceContext(
                 query="test query 2",
                 retrieved_nodes=[
@@ -570,8 +609,8 @@ class TestComputeRetrievalMetrics:
         Then:
             Returns empty metrics dict.
         """
-        ground_truth = {}
-        results = []
+        ground_truth: dict[str, list[str]] = {}
+        results: list[CaseResult] = []
 
         aggregated = compute_retrieval_metrics(results, ground_truth)
 
@@ -609,7 +648,6 @@ class TestComputeRetrievalMetrics:
 
 
 @pytest.mark.unit
-@pytest.mark.rag_edge_case
 class TestMetricsNumericalStability:
     """Test suite for numerical stability and edge cases per TEST_POLICY.md Section 4."""
 
@@ -623,7 +661,7 @@ class TestMetricsNumericalStability:
         Then:
             Result is always a valid float, never NaN or infinity.
         """
-        test_cases = [
+        test_cases: list[tuple[list[str], list[str], int]] = [
             ([], [], 5),
             (["a"], [], 5),
             ([], ["a"], 5),
@@ -647,7 +685,7 @@ class TestMetricsNumericalStability:
         Then:
             Result is always a valid float between 0.0 and 1.0.
         """
-        test_cases = [
+        test_cases: list[tuple[list[str], list[str], int]] = [
             ([], [], 5),
             (["a"], [], 5),
             ([], ["a"], 5),
@@ -671,7 +709,7 @@ class TestMetricsNumericalStability:
         Then:
             Result is always a valid float, handles division by zero gracefully.
         """
-        test_cases = [
+        test_cases: list[tuple[list[str], list[str], int]] = [
             ([], [], 5),
             (["a"], [], 5),
             ([], ["a"], 5),

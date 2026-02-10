@@ -6,13 +6,18 @@ TEST_POLICY.md Section 2.3 to avoid heavy tokenizer dependencies.
 """
 
 import time
+from collections.abc import AsyncIterator
+from typing import Literal
 
 import pytest
+from typing_extensions import Any
 
 from ragmark.generation.context import ContextManager
+from ragmark.generation.drivers import BaseLLMDriver
+from ragmark.schemas.generation import GenerationResult
 
 
-class FakeLLMDriver:
+class FakeLLMDriver(BaseLLMDriver):
     """Fake LLM driver for testing context management.
 
     Implements simplified token counting without external dependencies.
@@ -20,11 +25,49 @@ class FakeLLMDriver:
     """
 
     def __init__(self, context_window: int = 100):
-        self.context_window = context_window
+        self._context_window = context_window
+
+    async def generate(
+        self,
+        prompt: str,
+        max_tokens: int,
+        temperature: float = 0.7,
+        stop: list[str] | None = None,
+        response_format: dict[
+            str, Literal["json_object"] | dict[Literal["json_schema"], Any]
+        ]
+        | None = None,
+    ) -> "GenerationResult":
+        raise NotImplementedError("FakeLLMDriver does not implement generate")
+
+    def generate_stream(
+        self,
+        prompt: str,
+        max_tokens: int,
+        temperature: float = 0.7,
+        stop: list[str] | None = None,
+    ) -> "AsyncIterator[str]":
+        raise NotImplementedError("FakeLLMDriver does not implement generate_stream")
+
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: Any,
+    ) -> None:
+        return None
 
     def count_tokens(self, text: str) -> int:
         """Count tokens using simplified character-based approximation."""
         return max(1, len(text) // 5)
+
+    @property
+    def context_window(self) -> int:
+        return self._context_window
+
+    @context_window.setter
+    def context_window(self, value: int) -> None:
+        self._context_window = value
 
 
 @pytest.fixture
@@ -465,7 +508,6 @@ class TestContextManagerEdgeCases:
         assert len(prompt) > 0
         assert "S" in prompt
 
-    @pytest.mark.rag_edge_case
     def test_fit_context_with_unicode_text(self, fake_driver: FakeLLMDriver):
         """Verify handling of Unicode text.
 
@@ -514,6 +556,7 @@ class TestContextManagerEdgeCases:
 
 @pytest.mark.unit
 @pytest.mark.benchmark
+@pytest.mark.performance
 class TestContextTruncateMiddlePerformance:
     """Benchmark tests for Context._truncate_middle() deque optimization."""
 
