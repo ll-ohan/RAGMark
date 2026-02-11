@@ -7,16 +7,19 @@ both synchronous generation and streaming outputs.
 import asyncio
 import os
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ragmark.exceptions import GenerationError
 from ragmark.logger import get_logger
 from ragmark.schemas.generation import GenerationResult, TokenUsage
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from llama_cpp import Llama
 
 
 class BaseLLMDriver(ABC):
@@ -37,6 +40,10 @@ class BaseLLMDriver(ABC):
         max_tokens: int,
         temperature: float = 0.7,
         stop: list[str] | None = None,
+        response_format: dict[
+            str, Literal["json_object"] | dict[Literal["json_schema"], Any]
+        ]
+        | None = None,
     ) -> GenerationResult:
         """Generate text completion for a prompt.
 
@@ -45,6 +52,7 @@ class BaseLLMDriver(ABC):
             max_tokens: Generation length limit.
             temperature: Sampling randomness (0.0 = deterministic).
             stop: Sequences that halt generation when encountered.
+            response_format: Optional response format constraint (e.g., JSON schema).
 
         Returns:
             Completion text, token usage statistics, and finish reason.
@@ -164,7 +172,7 @@ class LlamaCppDriver(BaseLLMDriver):
         self._n_gpu_layers = n_gpu_layers
         self._n_threads = n_threads or os.cpu_count()
         self._verbose = verbose
-        self._model: Any = None
+        self._model: Llama | None = None
         self._executor: ThreadPoolExecutor | None = None
 
         logger.debug(
@@ -193,7 +201,10 @@ class LlamaCppDriver(BaseLLMDriver):
         self._executor = ThreadPoolExecutor(max_workers=1)
 
         try:
-            self._model = await loop.run_in_executor(self._executor, self._load_model)
+            self._model = await loop.run_in_executor(
+                self._executor,
+                cast(Callable[[], Any], self._load_model),
+            )
             logger.info(
                 "Model loading completed: path=%s, n_ctx=%d",
                 self.model_path,
@@ -221,7 +232,7 @@ class LlamaCppDriver(BaseLLMDriver):
             self._executor.shutdown(wait=True)
             logger.debug("Thread pool executor shutdown complete")
 
-    def _load_model(self) -> Any:
+    def _load_model(self) -> "Llama":
         """Load llama.cpp model in thread pool worker.
 
         Returns:
@@ -230,14 +241,6 @@ class LlamaCppDriver(BaseLLMDriver):
         Raises:
             GenerationError: If llama-cpp-python not installed or model file missing.
         """
-        try:
-            from llama_cpp import Llama
-        except ImportError as e:
-            raise GenerationError(
-                "llama-cpp-python not installed. "
-                "Install with: pip install llama-cpp-python"
-            ) from e
-
         if not self.model_path.exists():
             raise GenerationError(f"Model file not found: {self.model_path}")
 
@@ -247,6 +250,14 @@ class LlamaCppDriver(BaseLLMDriver):
             self._n_gpu_layers,
             self._n_threads,
         )
+
+        try:
+            from llama_cpp import Llama
+        except ImportError as e:
+            raise GenerationError(
+                "llama-cpp-python not installed. "
+                "Install with: pip install llama-cpp-python"
+            ) from e
 
         return Llama(
             model_path=str(self.model_path),
@@ -262,6 +273,10 @@ class LlamaCppDriver(BaseLLMDriver):
         max_tokens: int,
         temperature: float = 0.7,
         stop: list[str] | None = None,
+        response_format: dict[
+            str, Literal["json_object"] | dict[Literal["json_schema"], Any]
+        ]
+        | None = None,
     ) -> GenerationResult:
         """Generate text completion for a prompt.
 
@@ -270,6 +285,9 @@ class LlamaCppDriver(BaseLLMDriver):
             max_tokens: Generation length limit.
             temperature: Sampling randomness (0.0 = deterministic).
             stop: Sequences that halt generation when encountered.
+            response_format: Optional response format constraint.
+                Use {"type": "json_object"} for JSON output.
+                Use {"type": "json_schema", "schema": {...}} for schema-constrained JSON.
 
         Returns:
             Completion text, token usage statistics, and finish reason.
@@ -279,47 +297,60 @@ class LlamaCppDriver(BaseLLMDriver):
         """
         if self._model is None:
             raise GenerationError("Model not loaded. Use async with context manager.")
+        if self._executor is None:
+            raise GenerationError(
+                "Model executor not initialized. Use async with context manager."
+            )
+
+        model: Llama = self._model
+        executor = self._executor
 
         logger.debug(
-            "Generation started: prompt_chars=%d, max_tokens=%d, temperature=%.2f",
+            "Generation started: prompt_chars=%d, max_tokens=%d, temperature=%.2f, response_format=%s",
             len(prompt),
             max_tokens,
             temperature,
+            response_format,
         )
 
         loop = asyncio.get_running_loop()
 
         try:
+            kwargs: dict[str, Any] = {
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stop": stop or [],
+                "echo": False,
+            }
+
+            if response_format is not None:
+                kwargs["response_format"] = response_format
             output = await loop.run_in_executor(
-                self._executor,
-                lambda: self._model(
-                    prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    stop=stop or [],
-                    echo=False,
-                ),
+                executor,
+                lambda: model(prompt, **kwargs),
             )
         except Exception as e:
             logger.error("Generation failed: prompt_chars=%d", len(prompt))
             logger.debug("Generation failure details: %s", e, exc_info=True)
             raise GenerationError("Text generation failed") from e
 
+        output_dict = cast(dict[str, Any], output)
+
         logger.debug(
             "Generation completed: output_chars=%d, completion_tokens=%d, finish_reason=%s",
-            len(output["choices"][0]["text"]),
-            output["usage"]["completion_tokens"],
-            output["choices"][0]["finish_reason"],
+            len(output_dict["choices"][0]["text"]),
+            output_dict["usage"]["completion_tokens"],
+            output_dict["choices"][0]["finish_reason"],
         )
 
         return GenerationResult(
-            text=output["choices"][0]["text"],
+            text=output_dict["choices"][0]["text"],
             usage=TokenUsage(
-                prompt_tokens=output["usage"]["prompt_tokens"],
-                completion_tokens=output["usage"]["completion_tokens"],
-                total_tokens=output["usage"]["total_tokens"],
+                prompt_tokens=output_dict["usage"]["prompt_tokens"],
+                completion_tokens=output_dict["usage"]["completion_tokens"],
+                total_tokens=output_dict["usage"]["total_tokens"],
             ),
-            finish_reason=output["choices"][0]["finish_reason"],
+            finish_reason=output_dict["choices"][0]["finish_reason"],
         )
 
     async def generate_stream(
@@ -345,6 +376,13 @@ class LlamaCppDriver(BaseLLMDriver):
         """
         if self._model is None:
             raise GenerationError("Model not loaded. Use async with context manager.")
+        if self._executor is None:
+            raise GenerationError(
+                "Model executor not initialized. Use async with context manager."
+            )
+
+        model: Llama = self._model
+        executor = self._executor
 
         logger.debug(
             "Streaming generation started: prompt_chars=%d, max_tokens=%d",
@@ -356,8 +394,8 @@ class LlamaCppDriver(BaseLLMDriver):
 
         try:
             stream = await loop.run_in_executor(
-                self._executor,
-                lambda: self._model(
+                executor,
+                lambda: model(
                     prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
@@ -367,7 +405,9 @@ class LlamaCppDriver(BaseLLMDriver):
                 ),
             )
 
-            for chunk in stream:
+            stream_chunks = cast(Iterable[dict[str, Any]], stream)
+
+            for chunk in stream_chunks:
                 if chunk["choices"][0]["text"]:
                     yield chunk["choices"][0]["text"]
 
@@ -393,7 +433,9 @@ class LlamaCppDriver(BaseLLMDriver):
         if self._model is None:
             raise GenerationError("Model not loaded. Use async with context manager.")
 
-        tokens = self._model.tokenize(text.encode("utf-8"))
+        model: Llama = self._model
+
+        tokens = model.tokenize(text.encode("utf-8"))
         token_count = len(tokens)
 
         logger.debug("Token counting: text_chars=%d, tokens=%d", len(text), token_count)

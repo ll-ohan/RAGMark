@@ -183,3 +183,34 @@ class EvaluationError(RAGMarkError):
     """
 
     pass
+
+
+class QuestionGenerationError(RAGMarkError):
+    """Raised when synthetic QA generation fails.
+
+    This includes LLM generation failures, parsing errors from structured
+    output, validation failures, or batch processing errors.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        node_id: str | None = None,
+        cause: Exception | None = None,
+    ):
+        """Initialize the question generation error.
+
+        Args:
+            message: Human-readable error description.
+            node_id: Optional ID of the knowledge node that failed.
+            cause: Optional underlying exception.
+        """
+        super().__init__(message, cause)
+        self.node_id = node_id
+
+    def __str__(self) -> str:
+        """Return string representation including node ID."""
+        base_msg = super().__str__()
+        if self.node_id:
+            return f"{base_msg} (node_id: {self.node_id})"
+        return base_msg

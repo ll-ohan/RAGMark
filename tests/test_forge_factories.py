@@ -204,10 +204,7 @@ class TestRegistryPattern:
             def from_config(cls, config: FragmenterConfig) -> "CustomFragmenter":
                 return cls()
 
-            def fragment(self, doc: SourceDoc) -> list[KnowledgeNode]:
-                return []
-
-            def fragment_batch(self, docs: object) -> Iterator[KnowledgeNode]:
+            def fragment_lazy(self, doc: SourceDoc) -> Iterator[KnowledgeNode]:
                 yield KnowledgeNode(
                     content="test",
                     source_id="test",

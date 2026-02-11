@@ -5,28 +5,32 @@ This module tests end-to-end RAG pipeline orchestration. Network I/O components
 components use fake implementations to ensure contract validation.
 """
 
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from test_context_manager import FakeLLMDriver
 
+from ragmark.generation.context import ContextManager
 from ragmark.generation.engine import RAGGenerator
+from ragmark.generation.prompts import PromptTemplate
 from ragmark.schemas.documents import KnowledgeNode, NodePosition
 from ragmark.schemas.generation import AnswerResult, GenerationResult, TokenUsage
 from ragmark.schemas.retrieval import RetrievedNode, TraceContext
 
 
-class FakePromptTemplate:
+class FakePromptTemplate(PromptTemplate):
     """Fake prompt template for testing.
 
     Implements real template interface without external dependencies.
     """
 
-    def render(self, **kwargs: dict) -> str:
+    def render(self, **kwargs: dict[str, Any]) -> str:
         """Render template with provided variables."""
         return f"Prompt: {kwargs.get('question', 'default')}"
 
 
-class FakeContextManager:
+class FakeContextManager(ContextManager):
     """Fake context manager for testing.
 
     Implements real context fitting logic without token counting overhead.
@@ -34,6 +38,7 @@ class FakeContextManager:
     """
 
     def __init__(self, max_tokens: int = 2048):
+        super().__init__(driver=FakeLLMDriver())
         self.max_tokens = max_tokens
         self.last_fitted_context = ""
         self.last_user_query = ""
@@ -74,22 +79,26 @@ def mock_retriever():
     """
     retriever = AsyncMock()
 
-    pos1 = NodePosition(start_char=0, end_char=100)
+    pos1 = NodePosition(start_char=0, end_char=100, page=1, section="section1")
     node1 = KnowledgeNode(
         node_id="node1",
         content="Context chunk 1",
         metadata={},
         source_id="source1",
         position=pos1,
+        dense_vector=[0.1, 0.2],
+        sparse_vector={0: 0.3, 1: 0.4},
     )
 
-    pos2 = NodePosition(start_char=100, end_char=200)
+    pos2 = NodePosition(start_char=100, end_char=200, page=2, section="section2")
     node2 = KnowledgeNode(
         node_id="node2",
         content="Context chunk 2",
         metadata={},
         source_id="source2",
         position=pos2,
+        dense_vector=[0.5, 0.6],
+        sparse_vector={0: 0.7, 1: 0.8},
     )
 
     retrieved = [
@@ -98,8 +107,7 @@ def mock_retriever():
     ]
 
     trace = TraceContext(
-        query="Test question",
-        retrieved_nodes=retrieved,
+        query="Test question", retrieved_nodes=retrieved, reranked=False
     )
 
     retriever.retrieve.return_value = trace
@@ -134,7 +142,7 @@ def fake_template():
 
     Uses real implementation per TEST_POLICY.md Section 2.3.
     """
-    return FakePromptTemplate()
+    return FakePromptTemplate(template="", input_variables=["question"])
 
 
 @pytest.fixture
@@ -152,10 +160,10 @@ class TestRAGGeneratorInitialization:
 
     def test_init_should_store_components(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify initialization stores all components.
 
@@ -186,10 +194,10 @@ class TestRAGGeneratorAnswer:
     @pytest.mark.asyncio
     async def test_answer_should_orchestrate_full_pipeline(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify answer method orchestrates full RAG pipeline.
 
@@ -228,10 +236,10 @@ class TestRAGGeneratorAnswer:
     @pytest.mark.asyncio
     async def test_answer_should_return_answer_result(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify answer returns complete AnswerResult.
 
@@ -261,10 +269,10 @@ class TestRAGGeneratorAnswer:
     @pytest.mark.asyncio
     async def test_answer_should_include_sources_when_requested(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify sources included when requested.
 
@@ -292,10 +300,10 @@ class TestRAGGeneratorAnswer:
     @pytest.mark.asyncio
     async def test_answer_should_exclude_sources_when_not_requested(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify sources excluded when not requested.
 
@@ -320,10 +328,10 @@ class TestRAGGeneratorAnswer:
     @pytest.mark.asyncio
     async def test_answer_should_extract_context_from_retrieved_nodes(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify context extraction from retrieved nodes.
 
@@ -350,10 +358,10 @@ class TestRAGGeneratorAnswer:
     @pytest.mark.asyncio
     async def test_answer_should_pass_user_query_to_context_manager(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify user query passed to context manager.
 
@@ -379,10 +387,10 @@ class TestRAGGeneratorAnswer:
     @pytest.mark.asyncio
     async def test_answer_should_calculate_total_time(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify total time calculation.
 
@@ -413,9 +421,9 @@ class TestRAGGeneratorEdgeCases:
     @pytest.mark.asyncio
     async def test_answer_should_handle_empty_retrieved_nodes(
         self,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify handling when no nodes retrieved.
 
@@ -427,10 +435,7 @@ class TestRAGGeneratorEdgeCases:
             Pipeline completes gracefully with empty context and empty sources.
         """
         retriever = AsyncMock()
-        empty_trace = TraceContext(
-            query="Question",
-            retrieved_nodes=[],
-        )
+        empty_trace = TraceContext(query="Question", retrieved_nodes=[], reranked=False)
         retriever.retrieve.return_value = empty_trace
 
         generator = RAGGenerator(
@@ -448,10 +453,10 @@ class TestRAGGeneratorEdgeCases:
     @pytest.mark.asyncio
     async def test_answer_should_preserve_retrieval_trace(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify retrieval trace is preserved in result.
 
@@ -477,10 +482,10 @@ class TestRAGGeneratorEdgeCases:
     @pytest.mark.asyncio
     async def test_answer_should_preserve_generation_result(
         self,
-        mock_retriever,
-        mock_driver,
-        fake_template,
-        fake_context_manager,
+        mock_retriever: AsyncMock,
+        mock_driver: AsyncMock,
+        fake_template: FakePromptTemplate,
+        fake_context_manager: FakeContextManager,
     ):
         """Verify generation result is preserved.
 

@@ -4,6 +4,7 @@ This module provides utilities for fitting retrieved context into LLM context wi
 while maximizing information retention through various truncation strategies.
 """
 
+from collections import deque
 from typing import Literal
 
 from ragmark.generation.drivers import BaseLLMDriver
@@ -140,7 +141,7 @@ class ContextManager:
         Returns:
             Prefix of chunks fitting within token budget.
         """
-        selected = []
+        selected: list[str] = []
         used_tokens = 0
 
         for chunk in chunks:
@@ -176,8 +177,8 @@ class ContextManager:
         if not chunks:
             return []
 
-        first_half = []
-        last_half = []
+        first_half: list[str] = []
+        last_half: deque[str] = deque()
         used_tokens = 0
 
         if chunks:
@@ -206,17 +207,21 @@ class ContextManager:
                     first_half.append(chunk)
                     used_tokens += tokens
                     left_idx += 1
-                add_left = False
+                    add_left = False
+                else:
+                    break
             else:
                 chunk = chunks[right_idx]
                 tokens = self.driver.count_tokens(chunk)
                 if used_tokens + tokens <= available:
-                    last_half.insert(0, chunk)
+                    last_half.appendleft(chunk)
                     used_tokens += tokens
                     right_idx -= 1
-                add_left = True
+                    add_left = True
+                else:
+                    break
 
-        selected = first_half + last_half
+        selected = first_half + list(last_half)
         logger.debug(
             "Truncate middle strategy: selected=%d/%d, used_tokens=%d/%d",
             len(selected),
@@ -239,7 +244,7 @@ class ContextManager:
         Returns:
             Highest priority chunks fitting within token budget.
         """
-        selected = []
+        selected: list[str] = []
         used_tokens = 0
 
         for chunk in chunks:

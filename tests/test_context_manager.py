@@ -5,12 +5,19 @@ truncate_end, truncate_middle). Uses a fake driver implementation per
 TEST_POLICY.md Section 2.3 to avoid heavy tokenizer dependencies.
 """
 
+import time
+from collections.abc import AsyncIterator
+from typing import Literal
+
 import pytest
+from typing_extensions import Any
 
 from ragmark.generation.context import ContextManager
+from ragmark.generation.drivers import BaseLLMDriver
+from ragmark.schemas.generation import GenerationResult
 
 
-class FakeLLMDriver:
+class FakeLLMDriver(BaseLLMDriver):
     """Fake LLM driver for testing context management.
 
     Implements simplified token counting without external dependencies.
@@ -18,11 +25,49 @@ class FakeLLMDriver:
     """
 
     def __init__(self, context_window: int = 100):
-        self.context_window = context_window
+        self._context_window = context_window
+
+    async def generate(
+        self,
+        prompt: str,
+        max_tokens: int,
+        temperature: float = 0.7,
+        stop: list[str] | None = None,
+        response_format: dict[
+            str, Literal["json_object"] | dict[Literal["json_schema"], Any]
+        ]
+        | None = None,
+    ) -> "GenerationResult":
+        raise NotImplementedError("FakeLLMDriver does not implement generate")
+
+    def generate_stream(
+        self,
+        prompt: str,
+        max_tokens: int,
+        temperature: float = 0.7,
+        stop: list[str] | None = None,
+    ) -> "AsyncIterator[str]":
+        raise NotImplementedError("FakeLLMDriver does not implement generate_stream")
+
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: Any,
+    ) -> None:
+        return None
 
     def count_tokens(self, text: str) -> int:
         """Count tokens using simplified character-based approximation."""
         return max(1, len(text) // 5)
+
+    @property
+    def context_window(self) -> int:
+        return self._context_window
+
+    @context_window.setter
+    def context_window(self, value: int) -> None:
+        self._context_window = value
 
 
 @pytest.fixture
@@ -463,7 +508,6 @@ class TestContextManagerEdgeCases:
         assert len(prompt) > 0
         assert "S" in prompt
 
-    @pytest.mark.rag_edge_case
     def test_fit_context_with_unicode_text(self, fake_driver: FakeLLMDriver):
         """Verify handling of Unicode text.
 
@@ -508,3 +552,67 @@ class TestContextManagerEdgeCases:
 
         assert len(prompt) > 0
         assert "Chunk 1" in prompt or "Chunk 2" in prompt
+
+
+@pytest.mark.unit
+@pytest.mark.performance
+class TestContextTruncateMiddlePerformance:
+    """Benchmark tests for Context._truncate_middle() deque optimization."""
+
+    def test_truncate_middle_1000_chunks_should_complete_under_5ms(self) -> None:
+        """Verifies _truncate_middle() achieves O(n) performance via deque optimization.
+
+        Given:
+            A context manager with 1000 chunks to truncate.
+        When:
+            Applying truncate_middle strategy with tight token budget.
+        Then:
+            Operation completes in under 5ms (40x faster than O(n²)), and
+            first/last chunks are preserved per truncate_middle semantics.
+        """
+        driver = FakeLLMDriver(context_window=1000)
+        manager = ContextManager(driver, strategy="truncate_middle")
+        chunks = [f"Chunk {i} with some content here" for i in range(1000)]
+
+        start = time.perf_counter()
+        selected = manager.fit_context(
+            system="System",
+            context_chunks=chunks,
+            user_query="Query",
+            max_completion=100,
+        )
+        duration_ms = (time.perf_counter() - start) * 1000
+
+        assert "Chunk 0" in selected
+        assert "Chunk 999" in selected
+        assert duration_ms < 5, f"Truncate took {duration_ms:.2f}ms, expected <5ms"
+
+    def test_truncate_middle_should_preserve_ordering_of_first_and_last_chunks(
+        self,
+    ) -> None:
+        """Verifies truncate_middle preserves chunk ordering for first and last halves.
+
+        Given:
+            Context manager with 20 identifiable chunks exceeding budget.
+        When:
+            Applying truncate_middle strategy.
+        Then:
+            First chunks appear in original order, last chunks appear in
+            original order, and middle chunks are omitted to fit budget.
+        """
+        driver = FakeLLMDriver(context_window=100)
+        manager = ContextManager(driver, strategy="truncate_middle")
+        chunks = [f"Item_{i:02d}" for i in range(20)]
+
+        selected = manager.fit_context(
+            system="S",
+            context_chunks=chunks,
+            user_query="Q",
+            max_completion=20,
+        )
+
+        first_idx = selected.find("Item_00")
+        last_idx = selected.find("Item_19")
+        assert first_idx != -1
+        assert last_idx != -1
+        assert first_idx < last_idx

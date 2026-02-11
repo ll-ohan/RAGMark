@@ -5,9 +5,11 @@ documents and their fragmented knowledge nodes throughout the ingestion
 and indexing pipeline.
 """
 
+from __future__ import annotations
+
 import hashlib
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import uuid4
 
 from pydantic import (
@@ -18,6 +20,26 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from ragmark.schemas.qa import SyntheticQAMetadata, SyntheticQAPairData
+
+if TYPE_CHECKING:
+    MetadataValue: TypeAlias = (
+        str
+        | int
+        | float
+        | bool
+        | None
+        | list["MetadataValue"]
+        | dict[str, "MetadataValue"]
+        | SyntheticQAMetadata
+        | SyntheticQAPairData
+    )
+else:
+    # Use permissive runtime alias to avoid TypeError from recursive type evaluation
+    MetadataValue = Any
+
+MetadataDict = dict[str, MetadataValue]
 
 
 class SourceDoc(BaseModel):
@@ -37,7 +59,7 @@ class SourceDoc(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     content: str = Field(..., description="Raw text content extracted from the source")
-    metadata: dict[str, Any] = Field(
+    metadata: MetadataDict = Field(
         default_factory=dict,
         description="Custom metadata (title, author, creation_date, etc.)",
     )
@@ -67,7 +89,7 @@ class SourceDoc(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def compute_content_hash(self) -> "SourceDoc":
+    def compute_content_hash(self) -> SourceDoc:
         """Compute SHA-256 hash of content for source_id if not explicitly set.
 
         This ensures that identical content produces the same source_id,
@@ -149,7 +171,7 @@ class KnowledgeNode(BaseModel):
     )
     content: str = Field(..., description="Text content of this chunk")
     source_id: str = Field(..., description="Reference to parent SourceDoc")
-    metadata: dict[str, Any] = Field(
+    metadata: MetadataDict = Field(
         default_factory=dict,
         description="Metadata inherited from source plus computed metadata",
     )
@@ -187,7 +209,7 @@ class KnowledgeNode(BaseModel):
         This automatically adds char_count, word_count, language, and created_at
         to metadata if they don't already exist.
         """
-        if "char_count" not in self.metadata:
+        if "char_count" not in self.metadata and self.content:
             self.metadata["char_count"] = len(self.content)
         if "word_count" not in self.metadata:
             self.metadata["word_count"] = len(self.content.split())
@@ -205,7 +227,7 @@ class KnowledgeNode(BaseModel):
         from langdetect import LangDetectException, detect
 
         try:
-            return cast(str, detect(self.content))
+            return detect(self.content)
         except (ImportError, LangDetectException):
             return "unknown"
 
@@ -233,7 +255,7 @@ class VectorPayload(BaseModel):
         description="Sparse embedding (token_id -> weight)",
     )
     content: str = Field(..., description="Original text content")
-    metadata: dict[str, Any] = Field(
+    metadata: MetadataDict = Field(
         default_factory=dict,
         description="Full metadata dictionary",
     )

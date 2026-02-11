@@ -364,7 +364,7 @@ fragmenter:
         base_dir = tmp_path / "configs"
         data = {"extra_files": ["data/file1.txt", "data/file2.txt"]}
 
-        resolved = ExperimentProfile._resolve_paths(data, base_dir)
+        resolved = ExperimentProfile._resolve_paths(data, base_dir)  # type: ignore[call-arg]
 
         expected_path_1 = base_dir / "data/file1.txt"
         expected_path_2 = base_dir / "data/file2.txt"

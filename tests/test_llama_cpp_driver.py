@@ -5,6 +5,7 @@ mocking the llama-cpp-python library for initialization, generation, and streami
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -40,9 +41,10 @@ class TestLlamaCppDriverInitialization:
         )
 
         assert driver.model_path == model_path
-        assert driver._n_ctx == 2048
-        assert driver._n_gpu_layers == 0
-        assert driver._model is None
+        assert driver._n_ctx == 2048  # type: ignore
+        assert driver._n_gpu_layers == 0  # type: ignore
+        assert driver._model is None  # type: ignore
+        assert driver._executor is None  # type: ignore
 
     @pytest.mark.asyncio
     async def test_aenter_should_load_model_lazily(self, tmp_path: Path):
@@ -65,8 +67,8 @@ class TestLlamaCppDriverInitialization:
             driver = LlamaCppDriver(model_path=model_path, n_ctx=2048)
 
             async with driver:
-                assert driver._model is not None
-                assert driver._executor is not None
+                assert driver._model is not None  # type: ignore
+                assert driver._executor is not None  # type: ignore
 
     @pytest.mark.asyncio
     async def test_aenter_should_raise_error_when_model_file_missing(
@@ -109,7 +111,7 @@ class TestLlamaCppDriverInitialization:
 
         original_import = __import__
 
-        def mock_import(name, *args, **kwargs):
+        def mock_import(name: str, *args: Any, **kwargs: Any):
             if name == "llama_cpp":
                 raise ImportError("No module named 'llama_cpp'")
             return original_import(name, *args, **kwargs)
@@ -139,7 +141,7 @@ class TestLlamaCppDriverInitialization:
             driver = LlamaCppDriver(model_path=model_path)
 
             async with driver:
-                executor = driver._executor
+                executor = driver._executor  # type: ignore
                 assert executor is not None
 
             assert executor._shutdown is True
@@ -262,7 +264,7 @@ class TestLlamaCppDriverGeneration:
             driver = LlamaCppDriver(model_path=model_path)
 
             async with driver:
-                chunks = []
+                chunks: list[str] = []
                 async for chunk in driver.generate_stream(
                     prompt="Test",
                     max_tokens=10,

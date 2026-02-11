@@ -99,7 +99,11 @@ class SentenceTransformerEmbedder(BaseEmbedder):
     """
 
     def __init__(
-        self, model_name: str | Path, device: str = "cpu", batch_size: int = 32
+        self,
+        model_name: str | Path,
+        device: str = "cpu",
+        batch_size: int = 32,
+        rate_limit: float | None = None,
     ):
         """Initialize the sentence transformer embedder.
 
@@ -107,12 +111,21 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             model_name: HuggingFace model identifier.
             device: Target hardware for inference.
             batch_size: Number of texts to process at once.
+            rate_limit: Maximum embedding batches per second for rate limiting.
         """
         self.model_name: str | Path = model_name
         self.device = device
         self.batch_size = batch_size
+        self.rate_limit = rate_limit
         self._model: Any | None = None
         self._dim: int | None = None
+
+        if rate_limit is not None:
+            from ragmark.index.rate_limiter import RateLimiter
+
+            self._rate_limiter: RateLimiter | None = RateLimiter(rate_limit)
+        else:
+            self._rate_limiter = None
 
     @classmethod
     def from_config(cls, config: EmbedderConfig) -> "SentenceTransformerEmbedder":
@@ -128,6 +141,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             model_name=config.model_name,
             device=config.device,
             batch_size=config.batch_size,
+            rate_limit=config.rate_limit,
         )
 
     def _load_model(self) -> None:
@@ -203,6 +217,34 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             logger.error("Embedding computation failed")
             logger.debug("Embedding error details: %s", e, exc_info=True)
             raise EmbeddingError(f"Embedding computation failed: {e}") from e
+
+    async def embed_async(self, texts: list[str]) -> list[list[float]]:
+        """Compute embeddings asynchronously with optional rate limiting.
+
+        Delegates embedding computation to thread pool to prevent event loop
+        blocking, with optional rate limiting for API quota management. Rate
+        limiting is applied per internal batch (ceil(len(texts) / batch_size)).
+
+        Args:
+            texts: Input texts to embed.
+
+        Returns:
+            Dense embedding vectors for each text.
+
+        Raises:
+            EmbeddingError: If embedding computation fails.
+        """
+        import asyncio
+
+        if self._rate_limiter is not None:
+            if not texts:
+                return []
+            batch_count = (len(texts) + self.batch_size - 1) // self.batch_size
+            await self._rate_limiter.acquire(tokens=batch_count)
+
+        # Delegate to thread pool (CPU-bound operation)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.embed, texts)
 
     @property
     def embedding_dim(self) -> int:

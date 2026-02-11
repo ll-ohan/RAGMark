@@ -44,7 +44,6 @@ class BaseFragmenter(ABC):
         """
         pass
 
-    @abstractmethod
     def fragment(self, doc: SourceDoc) -> list[KnowledgeNode]:
         """Fragment a single source document into knowledge nodes.
 
@@ -57,25 +56,37 @@ class BaseFragmenter(ABC):
         Raises:
             FragmentationError: If fragmentation fails.
         """
+        return list(self.fragment_lazy(doc))
+
+    @abstractmethod
+    def fragment_lazy(self, doc: SourceDoc) -> Iterator[KnowledgeNode]:
+        """Fragment document with streaming output (O(1) memory per node).
+
+        Args:
+            doc: Source document to process.
+
+        Yields:
+            Knowledge nodes as generated.
+
+        Raises:
+            FragmentationError: If fragmentation fails.
+        """
         pass
 
     def fragment_batch(self, docs: Iterable[SourceDoc]) -> Iterator[KnowledgeNode]:
-        """Fragment multiple documents with streaming output.
-
-        This method processes documents one at a time and yields nodes
-        immediately as they are created, ensuring O(1) memory consumption.
+        """Fragment multiple documents with streaming output (O(1) memory).
 
         Args:
-            docs: The source documents to process.
+            docs: Source documents to process.
 
         Yields:
-            Knowledge nodes as they are generated.
+            Knowledge nodes as generated.
 
         Raises:
             FragmentationError: If fragmentation fails for any document.
         """
         for doc in docs:
-            yield from self.fragment(doc)
+            yield from self.fragment_lazy(doc)
 
     @property
     @abstractmethod
@@ -171,19 +182,22 @@ class TokenFragmenter(BaseFragmenter):
 
         return self._encoding
 
-    def fragment(self, doc: SourceDoc) -> list[KnowledgeNode]:
-        """Fragment a document into token-based chunks.
+    def fragment_lazy(self, doc: SourceDoc) -> Iterator[KnowledgeNode]:
+        """Fragment document into token-based chunks with streaming output.
+
+        Initial tokenization requires O(document_tokens) memory, unavoidable
+        with tiktoken. Subsequent chunking uses O(1) memory per node.
 
         Args:
-            doc: The source document to process.
+            doc: Source document to process.
 
-        Returns:
-            A list of knowledge nodes containing token-based chunks.
+        Yields:
+            Token-based knowledge nodes.
 
         Raises:
             FragmentationError: If fragmentation fails.
         """
-        logger.debug("Fragmentation started: source_id=%s", doc.source_id)
+        logger.debug("Lazy fragmentation started: source_id=%s", doc.source_id)
 
         try:
             encoding = self._get_encoding()
@@ -206,9 +220,9 @@ class TokenFragmenter(BaseFragmenter):
                 )
                 raise FragmentationError("Document tokenization produced no tokens")
 
-            nodes: list[KnowledgeNode] = []
             start_token_idx = 0
             current_char_pos = 0
+            chunk_index = 0
 
             def _find_end_offset(
                 source_text: str, start_pos: int, target_text: str
@@ -264,7 +278,7 @@ class TokenFragmenter(BaseFragmenter):
                         metadata={
                             **source_metadata,
                             "token_count": len(chunk_tokens),
-                            "chunk_index": len(nodes),
+                            "chunk_index": chunk_index,
                         },
                         position=NodePosition(
                             start_char=start_char,
@@ -276,7 +290,8 @@ class TokenFragmenter(BaseFragmenter):
                         sparse_vector=None,
                     )
 
-                    nodes.append(node)
+                    yield node
+                    chunk_index += 1
 
                 stride_token_count = self._chunk_size - self._overlap
 
@@ -296,17 +311,16 @@ class TokenFragmenter(BaseFragmenter):
                 start_token_idx += stride_token_count
 
             logger.info(
-                "Fragmentation completed: source_id=%s, nodes=%d, tokens=%d",
+                "Lazy fragmentation completed: source_id=%s, nodes=%d, tokens=%d",
                 doc.source_id,
-                len(nodes),
+                chunk_index,
                 token_count,
             )
-            return nodes
 
         except Exception as e:
             from ragmark.exceptions import FragmentationError
 
-            logger.error("Fragmentation failed: source_id=%s", doc.source_id)
+            logger.error("Lazy fragmentation failed: source_id=%s", doc.source_id)
             logger.debug("Fragmentation error details: %s", e, exc_info=True)
             raise FragmentationError(f"Fragmentation failed: {e}") from e
 

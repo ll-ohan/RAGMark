@@ -1,5 +1,6 @@
 """Unit tests for the SentenceTransformerEmbedder wrapper."""
 
+import time
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
@@ -28,8 +29,8 @@ class TestSentenceTransformerEmbedder:
         assert embedder.model_name == "test-model"
         assert embedder.device == "cpu"
         assert embedder.batch_size == 32
-        assert embedder._model is None, "Model should be lazy loaded"
-        assert embedder._dim is None
+        assert embedder._model is None, "Model should be lazy loaded"  # type: ignore
+        assert embedder._dim is None  # type: ignore
 
     def test_init_should_respect_custom_parameters_when_provided(self) -> None:
         """
@@ -72,7 +73,7 @@ class TestSentenceTransformerEmbedder:
         Then: The sentence-transformers model should be loaded and dimensions cached.
         """
         embedder = SentenceTransformerEmbedder(model_name="test-model")
-        assert embedder._model is None
+        assert embedder._model is None  # type: ignore
 
         mock_st = MagicMock()
         mock_model = MagicMock()
@@ -80,10 +81,10 @@ class TestSentenceTransformerEmbedder:
         mock_st.SentenceTransformer.return_value = mock_model
 
         with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            embedder._load_model()
+            embedder._load_model()  # type: ignore
 
-        assert embedder._model is mock_model
-        assert embedder._dim == 384
+        assert embedder._model is mock_model  # type: ignore
+        assert embedder._dim == 384  # type: ignore
         mock_st.SentenceTransformer.assert_called_once_with("test-model", device="cpu")
 
     def test_load_model_should_cache_instance_to_prevent_multiple_initializations(
@@ -101,11 +102,11 @@ class TestSentenceTransformerEmbedder:
         mock_st.SentenceTransformer.return_value = mock_model
 
         with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            embedder._load_model()
-            first_model = embedder._model
+            embedder._load_model()  # type: ignore
+            first_model = embedder._model  # type: ignore
 
-            embedder._load_model()
-            second_model = embedder._model
+            embedder._load_model()  # type: ignore
+            second_model = embedder._model  # type: ignore
 
         assert first_model is second_model
         assert mock_st.SentenceTransformer.call_count == 1
@@ -122,7 +123,7 @@ class TestSentenceTransformerEmbedder:
 
         with patch.dict("sys.modules", {"sentence_transformers": None}):
             with pytest.raises(UnsupportedBackendError, match="sentence-transformers"):
-                embedder._load_model()
+                embedder._load_model()  # type: ignore
 
     def test_load_model_should_raise_embedding_error_preserving_cause_when_loading_fails(
         self,
@@ -142,7 +143,7 @@ class TestSentenceTransformerEmbedder:
             with pytest.raises(
                 EmbeddingError, match="Failed to load model"
             ) as exc_info:
-                embedder._load_model()
+                embedder._load_model()  # type: ignore
 
             assert exc_info.value.__cause__ is original_error
 
@@ -235,7 +236,7 @@ class TestSentenceTransformerEmbedder:
         Then: The model should be loaded to retrieve the dimension.
         """
         embedder = SentenceTransformerEmbedder(model_name="test-model")
-        assert embedder._model is None
+        assert embedder._model is None  # type: ignore
 
         mock_st = MagicMock()
         mock_model = MagicMock()
@@ -246,7 +247,7 @@ class TestSentenceTransformerEmbedder:
             dim = embedder.embedding_dim
 
         assert dim == 768
-        assert embedder._model is not None
+        assert embedder._model is not None  # type: ignore
 
     def test_supports_sparse_should_return_false(self) -> None:
         """
@@ -257,7 +258,6 @@ class TestSentenceTransformerEmbedder:
         embedder = SentenceTransformerEmbedder(model_name="test-model")
         assert embedder.supports_sparse is False
 
-    @pytest.mark.rag_edge_case
     def test_embed_should_handle_unicode_and_special_characters_correctly(self) -> None:
         """
         Given: Texts containing complex unicode, NFD normalization, and ideographic spaces.
@@ -308,7 +308,7 @@ class TestSentenceTransformerEmbedder:
         assert isinstance(result, list)
         assert isinstance(result[0], list)
         assert isinstance(result[0][0], float)
-        assert pytest.approx(result[0][0]) == 1.5
+        assert abs(result[0][0] - 1.5) < 1e-6
 
     def test_embed_should_disable_normalization_by_default(self) -> None:
         """
@@ -327,3 +327,94 @@ class TestSentenceTransformerEmbedder:
             embedder.embed(["text"])
 
         assert mock_model.encode.call_args[1]["normalize_embeddings"] is False
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.performance
+@pytest.mark.asyncio
+class TestEmbedderRateLimiting:
+    """Tests for SentenceTransformerEmbedder rate limiting integration."""
+
+    async def test_embedder_with_rate_limit_should_throttle_requests(self) -> None:
+        """Verifies embedder respects rate_limit parameter.
+
+        Given:
+            SentenceTransformerEmbedder with rate_limit=2.0 and batch_size=2.
+        When:
+            Embedding 10 texts via embed_async().
+        Then:
+            Operation takes approximately 1.5 seconds (5 batches, 2/s after burst).
+        """
+        embedder = SentenceTransformerEmbedder(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            batch_size=2,
+            rate_limit=2.0,
+        )
+
+        # Warmup: load model (not timed)
+        await embedder.embed_async(["warmup"])
+
+        texts = [f"Test text {i}" for i in range(10)]
+
+        start = time.time()
+        await embedder.embed_async(texts)
+        duration = time.time() - start
+
+        # 5 batches at 2/s = ~1.5s rate limiting (2 immediate + 3 at 2/s)
+        assert 1.0 < duration < 6.0, f"Rate limit not enforced: {duration:.2f}s"
+
+    async def test_embedder_without_rate_limit_should_run_unrestricted(self) -> None:
+        """Verifies embedder without rate_limit runs at full speed.
+
+        Given:
+            SentenceTransformerEmbedder with rate_limit=None.
+        When:
+            Embedding 10 texts (after model warmup).
+        Then:
+            Completes quickly without artificial delays.
+        """
+        embedder = SentenceTransformerEmbedder(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            rate_limit=None,
+        )
+
+        texts = [f"Quick test {i}" for i in range(10)]
+
+        # Warmup: load model (not timed)
+        await embedder.embed_async(["warmup"])
+
+        start = time.time()
+        await embedder.embed_async(texts)
+        duration = time.time() - start
+
+        # Should complete in <2s without rate limiting (model already loaded)
+        assert duration < 2.0, f"Unrestricted took too long: {duration:.2f}s"
+
+    async def test_embedder_rate_limit_should_work_with_batching(self) -> None:
+        """Verifies rate limiting applies per batch, not per text.
+
+        Given:
+            SentenceTransformerEmbedder with rate_limit=2.0, batch_size=5.
+        When:
+            Embedding 15 texts (processed as 3 batches).
+        Then:
+            Duration reflects 3 batch acquisitions at 2/s (~0.5 second).
+        """
+        embedder = SentenceTransformerEmbedder(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            batch_size=5,
+            rate_limit=2.0,
+        )
+
+        # Warmup: load model (not timed)
+        await embedder.embed_async(["warmup"])
+
+        texts = [f"Batch test {i}" for i in range(15)]
+
+        start = time.time()
+        await embedder.embed_async(texts)
+        duration = time.time() - start
+
+        # 3 batches at 2/s = ~0.5s rate limiting
+        assert 0.3 < duration < 6.0, f"Batch rate limiting: {duration:.2f}s"

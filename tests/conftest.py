@@ -7,10 +7,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, cast
 
-import fitz
 import pytest
 import requests
 
+import fitz  # type: ignore[import] PyMuPDF
 from ragmark.config.profile import EmbedderConfig, IndexConfig, RetrievalConfig
 from ragmark.index.backends import MemoryIndex
 from ragmark.index.base import VectorIndex
@@ -237,7 +237,7 @@ class FakeVectorIndex(VectorIndex):
     ) -> "FakeVectorIndex":
         return cls(embedder=embedder)
 
-    async def add(self, nodes: list[KnowledgeNode]) -> None:
+    async def add(self, nodes: list[KnowledgeNode], monitoring: Any = None) -> None:
         pass
 
     async def search_hybrid(self, *_: Any, **__: Any) -> list[SearchResult]:
@@ -351,12 +351,12 @@ def pdf_bytes_factory() -> Callable[..., bytes]:
         filename = font_url.split("/")[-1]
         path_to_font = _download_font(font_url, filename)
 
-        doc: Any = fitz.open()
+        doc: Any = fitz.open()  # type: ignore[call-arg] fitz.open() can accept no args to create a new PDF
         for i in range(pages):
-            page: Any = doc.new_page()
+            page: Any = doc.new_page()  # type: ignore[call-arg]
             if i == 0 and content:
                 try:
-                    page.insert_text(
+                    page.insert_text(  # type: ignore[call-arg]
                         (50, 50),
                         content,
                         fontname=font_name,
@@ -364,22 +364,22 @@ def pdf_bytes_factory() -> Callable[..., bytes]:
                     )
                 except Exception as e:
                     print(f"Warning: Font insertion failed: {e}")
-                    page.insert_text((50, 50), content)
+                    page.insert_text((50, 50), content)  # type: ignore[call-arg]
 
-        doc.set_metadata({"title": title})
+        doc.set_metadata({"title": title})  # type: ignore[call-arg]
         if toc:
-            doc.set_toc([[1, t, i + 1] for i, t in enumerate(toc)])
+            doc.set_toc([[1, t, i + 1] for i, t in enumerate(toc)])  # type: ignore[call-arg]
 
         save_args: dict[str, Any] = {}
         if encrypt:
             save_args = {
-                "encryption": fitz.PDF_ENCRYPT_AES_256,
+                "encryption": fitz.PDF_ENCRYPT_AES_256,  # type: ignore[attr-defined]
                 "owner_pw": "owner",
                 "user_pw": password,
             }
 
-        pdf_bytes = doc.tobytes(**save_args)
-        doc.close()
+        pdf_bytes = doc.tobytes(**save_args)  # type: ignore[call-arg]
+        doc.close()  # type: ignore[call-arg]
         return cast(bytes, pdf_bytes)
 
     return _make_pdf
@@ -464,6 +464,80 @@ def trace_factory(sample_knowledge_node: KnowledgeNode) -> Callable[..., TraceCo
         )
 
     return _make_trace
+
+
+@pytest.fixture
+def enriched_node_factory() -> Callable[..., KnowledgeNode]:
+    """Factory to create enriched KnowledgeNode with synthetic QA metadata.
+
+    Returns:
+        A callable that generates enriched nodes with QA pairs.
+    """
+
+    def _make_enriched_node(
+        content: str,
+        source_id: str,
+        num_qa_pairs: int = 2,
+    ) -> KnowledgeNode:
+        qa_pairs: list[dict[str, Any]] = []
+        for i in range(num_qa_pairs):
+            qa_pairs.append(
+                {
+                    "question": f"Question {i+1} about {source_id}?",
+                    "answer": f"Answer {i+1}: {content[:50]}",
+                    "confidence": 0.9,
+                }
+            )
+
+        metadata: dict[str, Any] = {
+            "synthetic_qa": {
+                "qa_pairs": qa_pairs,
+                "generated_at": "2024-01-01T00:00:00Z",
+                "model": "test-model",
+                "num_questions_requested": num_qa_pairs,
+                "num_questions_validated": num_qa_pairs,
+                "batch_id": "test_batch",
+            },
+            "custom_field": "custom_value",
+        }
+
+        return KnowledgeNode(
+            content=content,
+            source_id=source_id,
+            position=NodePosition(
+                start_char=0, end_char=len(content), page=1, section="Test Section"
+            ),
+            metadata=metadata,
+            dense_vector=[0.1, 0.2, 0.3],
+            sparse_vector=None,
+        )
+
+    return _make_enriched_node
+
+
+@pytest.fixture
+def test_node_factory() -> Callable[..., KnowledgeNode]:
+    """Factory to create test KnowledgeNode instances.
+
+    Returns:
+        A callable that generates test nodes with minimal valid data.
+    """
+
+    def _make_test_node(
+        content: str,
+        source_id: str = "test",
+    ) -> KnowledgeNode:
+        return KnowledgeNode(
+            content=content,
+            source_id=source_id,
+            position=NodePosition(
+                start_char=0, end_char=len(content), page=1, section="test"
+            ),
+            dense_vector=[0.1, 0.2, 0.3],
+            sparse_vector=None,
+        )
+
+    return _make_test_node
 
 
 # Test helpers for assertion patterns

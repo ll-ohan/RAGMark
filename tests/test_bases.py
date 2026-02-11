@@ -4,7 +4,7 @@ import inspect
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from io import BytesIO
 from pathlib import Path
-from typing import Any, BinaryIO, cast
+from typing import Any, BinaryIO, Literal, cast
 
 import pytest
 from conftest import assert_abstract_class_cannot_be_instantiated
@@ -59,7 +59,9 @@ class MinimalVectorIndex(VectorIndex):
         instance.embedder = embedder
         return instance
 
-    async def add(self, nodes: list[KnowledgeNode]) -> None:
+    async def add(
+        self, nodes: list[KnowledgeNode], monitoring: Any | None = None
+    ) -> None:
         if self._should_fail:
             try:
                 raise ValueError("Simulated internal error")
@@ -221,28 +223,40 @@ class MinimalFragmenter(BaseFragmenter):
             cls(chunk_size=config.chunk_size, overlap=config.overlap),
         )
 
-    def fragment(self, doc: SourceDoc) -> list[KnowledgeNode]:
+    def fragment_lazy(self, doc: SourceDoc) -> Iterator[KnowledgeNode]:
+        """Yields a single KnowledgeNode from the source document.
+
+        This minimal implementation creates exactly one node containing the
+        entire document content for contract testing purposes.
+
+        Args:
+            doc: Source document to fragment.
+
+        Yields:
+            A single KnowledgeNode with the document's full content.
+
+        Raises:
+            FragmentationError: If should_fail is True during instantiation.
+        """
         if self._should_fail:
             try:
                 raise ValueError("Simulated fragmentation error")
             except ValueError as e:
                 raise FragmentationError("Fragmentation failed") from e
 
-        return [
-            KnowledgeNode(
-                content=doc.content,
-                source_id=doc.source_id,
-                metadata=doc.metadata,
-                position=NodePosition(
-                    start_char=0,
-                    end_char=len(doc.content),
-                    page=None,
-                    section=None,
-                ),
-                dense_vector=None,
-                sparse_vector=None,
-            )
-        ]
+        yield KnowledgeNode(
+            content=doc.content,
+            source_id=doc.source_id,
+            metadata=doc.metadata,
+            position=NodePosition(
+                start_char=0,
+                end_char=len(doc.content),
+                page=None,
+                section=None,
+            ),
+            dense_vector=None,
+            sparse_vector=None,
+        )
 
     @property
     def chunk_size(self) -> int:
@@ -304,6 +318,10 @@ class MinimalLLMDriver(BaseLLMDriver):
         max_tokens: int,
         temperature: float = 0.7,
         stop: list[str] | None = None,
+        response_format: dict[
+            str, dict[Literal["json_schema"], Any] | Literal["json_object"]
+        ]
+        | None = None,
     ) -> GenerationResult:
         if self._should_fail:
             try:
@@ -1133,6 +1151,36 @@ class TestBaseFragmenterContract:
         assert isinstance(nodes, list)
         assert all(isinstance(node, KnowledgeNode) for node in nodes)
 
+    def test_fragment_lazy_should_yield_nodes_as_generator(
+        self, doc_factory: Callable[..., SourceDoc]
+    ) -> None:
+        """Verifies that fragment_lazy returns a lazy iterator yielding nodes.
+
+        Given:
+            A MinimalFragmenter and a SourceDoc with specific content.
+        When:
+            Calling fragment_lazy.
+        Then:
+            It returns an Iterator that yields exactly one KnowledgeNode with
+            the document's content, source_id, metadata, and position preserved.
+        """
+        fragmenter = MinimalFragmenter()
+        doc = doc_factory(content="Test document content")
+
+        result = fragmenter.fragment_lazy(doc)
+
+        assert isinstance(result, Iterator)
+        nodes = list(result)
+        assert len(nodes) == 1
+        assert nodes[0].content == "Test document content"
+        assert nodes[0].source_id == doc.source_id
+        assert all(
+            k in nodes[0].metadata and nodes[0].metadata[k] == v
+            for k, v in doc.metadata.items()
+        )
+        assert nodes[0].position.start_char == 0
+        assert nodes[0].position.end_char == len(doc.content)
+
     def test_fragment_batch_should_yield_nodes_as_generator(
         self, doc_factory: Callable[..., SourceDoc]
     ) -> None:
@@ -1353,7 +1401,7 @@ class TestBaseIngestorContract:
         """
         ingestor = MinimalIngestor()
 
-        files = []
+        files: list[Path] = []
         for i in range(3):
             file_path = tmp_path / f"doc_{i}.txt"
             file_path.write_text(f"Content {i}")
@@ -1380,7 +1428,7 @@ class TestBaseIngestorContract:
         """
         ingestor = MinimalIngestor()
 
-        files = []
+        files: list[Path] = []
         for i in range(2):
             file_path = tmp_path / f"file_{i}.txt"
             file_path.write_text(f"File {i}")
@@ -1575,7 +1623,7 @@ class TestBaseLLMDriverContract:
 
         assert inspect.isasyncgen(stream)
 
-        chunks = []
+        chunks: list[Any] = []
         async for chunk in stream:
             chunks.append(chunk)
             assert isinstance(chunk, str)

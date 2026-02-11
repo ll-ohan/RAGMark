@@ -68,6 +68,7 @@ class TestDenseRetriever:
         assert trace.retrieved_nodes[0].node.content == "Expected Result"
         assert_allclose(trace.retrieved_nodes[0].score, 0.95, atol=1e-6)
         assert trace.retrieval_metadata["strategy"] == "dense"
+        assert isinstance(trace.retrieval_metadata["total_time_ms"], float)
         assert trace.retrieval_metadata["total_time_ms"] >= 0
 
     @pytest.mark.asyncio
@@ -193,7 +194,6 @@ class TestDenseRetriever:
             await retriever.retrieve(query="test")
 
     @pytest.mark.asyncio
-    @pytest.mark.rag_edge_case
     async def test_retrieve_should_handle_unicode_complex_queries_correctly(
         self,
         node_factory: Callable[..., KnowledgeNode],

@@ -98,6 +98,7 @@ class EmbedderConfig(BaseModel):
         model_name: HuggingFace model identifier or local path.
         device: Device to use for inference (cpu, cuda, mps).
         batch_size: Batch size for embedding computation.
+        rate_limit: Maximum embedding batches per second (None for unlimited).
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -114,6 +115,11 @@ class EmbedderConfig(BaseModel):
         default=32,
         ge=1,
         description="Batch size for embedding computation",
+    )
+    rate_limit: float | None = Field(
+        default=None,
+        ge=0.1,
+        description="Maximum embedding batches per second (None for unlimited)",
     )
 
 
@@ -275,11 +281,83 @@ class GeneratorConfig(BaseModel):
     )
 
 
+class QuestionGeneratorConfig(BaseModel):
+    """Configuration for synthetic QA generation.
+
+    Attributes:
+        enabled: Enable QA generation.
+        backend: Generation backend.
+        model_path: Path to LLM model.
+        num_questions: QA pairs per chunk.
+        batch_size: Nodes per LLM call.
+        temperature: Sampling temperature.
+        max_tokens: Maximum tokens for generation.
+        context_window: Model context window.
+        n_gpu_layers: GPU layers for acceleration.
+        validation: Enable QA validation.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable synthetic QA generation",
+    )
+    backend: Literal["llm"] = Field(
+        default="llm",
+        description="Question generation backend",
+    )
+    model_path: Path = Field(
+        ...,
+        description="Path to LLM model (GGUF format)",
+    )
+    num_questions: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of QA pairs per chunk",
+    )
+    batch_size: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        description="Nodes per LLM batch call",
+    )
+    temperature: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature",
+    )
+    max_tokens: int = Field(
+        default=512,
+        ge=128,
+        le=2048,
+        description="Maximum tokens for generation",
+    )
+    context_window: int = Field(
+        default=4096,
+        ge=512,
+        le=32768,
+        description="Model context window size",
+    )
+    n_gpu_layers: int = Field(
+        default=0,
+        ge=0,
+        description="Number of GPU layers (0=CPU only)",
+    )
+    validation: bool = Field(
+        default=True,
+        description="Enable QA validation",
+    )
+
+
 class EvaluationConfig(BaseModel):
     """Configuration for evaluation.
 
     Attributes:
         metrics: List of metrics to compute.
+        metric_parameters: Parameters for parameterized metrics.
         trial_cases_path: Path to trial cases file.
         judge_model_path: Optional path to judge LLM for generation metrics.
     """
@@ -306,6 +384,13 @@ class EvaluationConfig(BaseModel):
         ),
         description="Metrics to compute",
     )
+    metric_parameters: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Metric parameters keyed by base name. "
+            "Example: {'recall': {'k': 10}, 'precision': {'ks': [5, 10]}}"
+        ),
+    )
     trial_cases_path: Path = Field(
         ...,
         description="Path to trial cases JSON/JSONL file",
@@ -313,6 +398,77 @@ class EvaluationConfig(BaseModel):
     judge_model_path: Path | None = Field(
         None,
         description="Path to judge LLM for generation metrics",
+    )
+
+
+class StreamingMetricsConfig(BaseModel):
+    """Configuration for streaming pipeline metrics.
+
+    Attributes:
+        enabled: Whether to enable metrics collection.
+        interval: Sampling interval in seconds.
+        max_samples: Memory limit for retained samples.
+        backpressure_threshold: Queue fill ratio triggering warnings.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable streaming metrics collection",
+    )
+    interval: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=60.0,
+        description="Sampling interval in seconds",
+    )
+    max_samples: int = Field(
+        default=10000,
+        ge=10,
+        le=100000,
+        description="Maximum samples to retain (memory bound)",
+    )
+    backpressure_threshold: float = Field(
+        default=0.8,
+        ge=0.5,
+        le=1.0,
+        description="Queue fill ratio to trigger warnings",
+    )
+
+
+class MonitoringMetricsConfig(BaseModel):
+    """Configuration for monitoring metrics.
+
+    Attributes:
+        enabled: Whether to enable monitoring metrics.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable monitoring metrics",
+    )
+
+
+class MetricsConfig(BaseModel):
+    """Configuration for metrics collection.
+
+    Attributes:
+        monitoring: Pipeline monitoring metrics settings.
+        streaming: Streaming pipeline metrics settings.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    monitoring: MonitoringMetricsConfig | None = Field(
+        default_factory=lambda: MonitoringMetricsConfig(enabled=False),
+        description="Monitoring metrics configuration",
+    )
+    streaming: StreamingMetricsConfig | None = Field(
+        default_factory=StreamingMetricsConfig,
+        description="Streaming pipeline metrics configuration",
     )
 
 
@@ -329,7 +485,9 @@ class ExperimentProfile(BaseModel):
         index: Vector index configuration.
         retrieval: Retrieval configuration.
         generator: LLM generation configuration.
+        question_generator: Synthetic QA generation configuration.
         evaluation: Evaluation configuration.
+        metrics: Metrics collection configuration.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -362,9 +520,17 @@ class ExperimentProfile(BaseModel):
         default=None,
         description="LLM generation configuration",
     )
+    question_generator: QuestionGeneratorConfig | None = Field(
+        default=None,
+        description="Optional synthetic QA generation configuration",
+    )
     evaluation: EvaluationConfig | None = Field(
         default=None,
         description="Evaluation configuration",
+    )
+    metrics: MetricsConfig | None = Field(
+        default_factory=MetricsConfig,
+        description="Metrics collection configuration",
     )
 
     @classmethod
@@ -406,7 +572,7 @@ class ExperimentProfile(BaseModel):
                 for k, v in cast(dict[str, Any], data).items()
             }
         elif isinstance(data, list):
-            return [ExperimentProfile._resolve_paths(item, base_dir) for item in data]
+            return [ExperimentProfile._resolve_paths(item, base_dir) for item in data]  # pyright: ignore[reportUnknownVariableType]
         elif isinstance(data, str):
             is_path = data.startswith(("./", "../", "/", "~", "\\")) or data.endswith(
                 (".pt", ".gguf", ".jsonl", ".json", ".yaml", ".yml", ".txt")
@@ -435,7 +601,7 @@ class ExperimentProfile(BaseModel):
                     for k, v in cast(dict[str, Any], obj).items()
                 }
             elif isinstance(obj, list):
-                return [convert_paths_to_str(item) for item in obj]
+                return [convert_paths_to_str(item) for item in obj]  # pyright: ignore[reportUnknownVariableType]
             return obj
 
         data = self.model_dump(mode="python")
