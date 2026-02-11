@@ -98,7 +98,7 @@ class EmbedderConfig(BaseModel):
         model_name: HuggingFace model identifier or local path.
         device: Device to use for inference (cpu, cuda, mps).
         batch_size: Batch size for embedding computation.
-        rate_limit: Maximum requests per second (None for unlimited).
+        rate_limit: Maximum embedding batches per second (None for unlimited).
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -119,7 +119,7 @@ class EmbedderConfig(BaseModel):
     rate_limit: float | None = Field(
         default=None,
         ge=0.1,
-        description="Maximum requests per second (None for unlimited)",
+        description="Maximum embedding batches per second (None for unlimited)",
     )
 
 

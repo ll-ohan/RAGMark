@@ -142,6 +142,19 @@ class BaseQuestionGenerator(ABC):
                 logger.debug("Batch failure details: %s", e, exc_info=True)
                 raise
 
+    async def __aenter__(self) -> "BaseQuestionGenerator":
+        """Enter async context for generators that manage resources."""
+        return self
+
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: Any,
+    ) -> None:
+        """Exit async context for generators that manage resources."""
+        return None
+
     @property
     @abstractmethod
     def num_questions(self) -> int:
@@ -232,6 +245,20 @@ class LLMQuestionGenerator(BaseQuestionGenerator):
             max_tokens=config.max_tokens,
             validator=validator,
         )
+
+    async def __aenter__(self) -> "LLMQuestionGenerator":
+        """Load the underlying LLM driver once for this generator."""
+        await self._driver.__aenter__()
+        return self
+
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: Any,
+    ) -> None:
+        """Release driver resources when exiting the generator context."""
+        await self._driver.__aexit__(_exc_type, _exc_val, _exc_tb)
 
     async def generate_async(self, node: KnowledgeNode) -> KnowledgeNode:
         """Generate QA pairs asynchronously for a single node.

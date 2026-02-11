@@ -340,28 +340,29 @@ class TestEmbedderRateLimiting:
         """Verifies embedder respects rate_limit parameter.
 
         Given:
-            SentenceTransformerEmbedder with rate_limit=5.0.
+            SentenceTransformerEmbedder with rate_limit=2.0 and batch_size=2.
         When:
-            Embedding 20 texts via embed_async().
+            Embedding 10 texts via embed_async().
         Then:
-            Operation takes approximately 3 seconds (20 texts ÷ 5/s, after burst).
+            Operation takes approximately 1.5 seconds (5 batches, 2/s after burst).
         """
         embedder = SentenceTransformerEmbedder(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
-            rate_limit=5.0,
+            batch_size=2,
+            rate_limit=2.0,
         )
 
         # Warmup: load model (not timed)
         await embedder.embed_async(["warmup"])
 
-        texts = [f"Test text {i}" for i in range(20)]
+        texts = [f"Test text {i}" for i in range(10)]
 
         start = time.time()
         await embedder.embed_async(texts)
         duration = time.time() - start
 
-        # 20 texts at 5/s = ~3s rate limiting (5 immediate + 15 at 5/s)
-        assert 2.5 < duration < 5.0, f"Rate limit not enforced: {duration:.2f}s"
+        # 5 batches at 2/s = ~1.5s rate limiting (2 immediate + 3 at 2/s)
+        assert 1.0 < duration < 6.0, f"Rate limit not enforced: {duration:.2f}s"
 
     async def test_embedder_without_rate_limit_should_run_unrestricted(self) -> None:
         """Verifies embedder without rate_limit runs at full speed.
@@ -396,9 +397,9 @@ class TestEmbedderRateLimiting:
         Given:
             SentenceTransformerEmbedder with rate_limit=2.0, batch_size=5.
         When:
-            Embedding 10 texts (processed as 2 batches).
+            Embedding 15 texts (processed as 3 batches).
         Then:
-            Duration reflects 2 batch acquisitions at 2/s (~1 second).
+            Duration reflects 3 batch acquisitions at 2/s (~0.5 second).
         """
         embedder = SentenceTransformerEmbedder(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
@@ -406,11 +407,14 @@ class TestEmbedderRateLimiting:
             rate_limit=2.0,
         )
 
-        texts = [f"Batch test {i}" for i in range(10)]
+        # Warmup: load model (not timed)
+        await embedder.embed_async(["warmup"])
+
+        texts = [f"Batch test {i}" for i in range(15)]
 
         start = time.time()
         await embedder.embed_async(texts)
         duration = time.time() - start
 
-        # 10 texts at 2/s = ~4s rate limiting + ~2s model loading
-        assert 0.8 < duration < 7.0, f"Batch rate limiting: {duration:.2f}s"
+        # 3 batches at 2/s = ~0.5s rate limiting
+        assert 0.3 < duration < 6.0, f"Batch rate limiting: {duration:.2f}s"

@@ -111,7 +111,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             model_name: HuggingFace model identifier.
             device: Target hardware for inference.
             batch_size: Number of texts to process at once.
-            rate_limit: Maximum requests per second for rate limiting.
+            rate_limit: Maximum embedding batches per second for rate limiting.
         """
         self.model_name: str | Path = model_name
         self.device = device
@@ -222,7 +222,8 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         """Compute embeddings asynchronously with optional rate limiting.
 
         Delegates embedding computation to thread pool to prevent event loop
-        blocking, with optional rate limiting for API quota management.
+        blocking, with optional rate limiting for API quota management. Rate
+        limiting is applied per internal batch (ceil(len(texts) / batch_size)).
 
         Args:
             texts: Input texts to embed.
@@ -236,7 +237,10 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         import asyncio
 
         if self._rate_limiter is not None:
-            await self._rate_limiter.acquire(tokens=len(texts))
+            if not texts:
+                return []
+            batch_count = (len(texts) + self.batch_size - 1) // self.batch_size
+            await self._rate_limiter.acquire(tokens=batch_count)
 
         # Delegate to thread pool (CPU-bound operation)
         loop = asyncio.get_running_loop()

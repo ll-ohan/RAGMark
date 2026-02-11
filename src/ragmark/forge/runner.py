@@ -384,39 +384,42 @@ class ForgeRunner:
 
                 i += 1
 
-        if self.question_generator:
-            batch_size = getattr(self.question_generator, "_batch_size", 4)
-            logger.debug("Applying QA generation: batch_size=%d", batch_size)
+        async with AsyncExitStack() as stack:
+            if self.question_generator:
+                await stack.enter_async_context(self.question_generator)
 
-            try:
-                enriched_stream = self.question_generator.generate_stream_async(
-                    node_stream(), batch_size=batch_size
-                )
+                batch_size = getattr(self.question_generator, "_batch_size", 4)
+                logger.debug("Applying QA generation: batch_size=%d", batch_size)
 
-                if monitor:
-                    async with monitor.stage("qa_generation"):
+                try:
+                    enriched_stream = self.question_generator.generate_stream_async(
+                        node_stream(), batch_size=batch_size
+                    )
+
+                    if monitor:
+                        async with monitor.stage("qa_generation"):
+                            async for enriched_node in enriched_stream:
+                                if "synthetic_qa" in enriched_node.metadata:
+                                    qa_enriched_count += 1
+                                yield enriched_node
+                                node_count += 1
+                    else:
                         async for enriched_node in enriched_stream:
                             if "synthetic_qa" in enriched_node.metadata:
                                 qa_enriched_count += 1
                             yield enriched_node
                             node_count += 1
-                else:
-                    async for enriched_node in enriched_stream:
-                        if "synthetic_qa" in enriched_node.metadata:
-                            qa_enriched_count += 1
-                        yield enriched_node
-                        node_count += 1
 
-            except QuestionGenerationError as e:
-                error_count += 1
-                logger.error("QA generation failed in pipeline: %s", e.message)
-                logger.debug("QA generation error details: %s", e, exc_info=True)
-                if self.fail_fast:
-                    raise
-        else:
-            async for node in node_stream():
-                yield node
-                node_count += 1
+                except QuestionGenerationError as e:
+                    error_count += 1
+                    logger.error("QA generation failed in pipeline: %s", e.message)
+                    logger.debug("QA generation error details: %s", e, exc_info=True)
+                    if self.fail_fast:
+                        raise
+            else:
+                async for node in node_stream():
+                    yield node
+                    node_count += 1
 
         logger.info(
             "Async Forge pipeline complete: documents=%d, nodes=%d, qa_enriched=%d, "

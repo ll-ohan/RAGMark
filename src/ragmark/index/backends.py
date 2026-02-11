@@ -384,14 +384,17 @@ class MemoryIndex(VectorIndex):
                 f"got {len(dense_vector)}"
             )
 
-        count = len(self._node_ids)
-        if count == 0:
-            return []
+        async with self._lock:
+            count = len(self._node_ids)
+            if count == 0:
+                return []
 
-        vectors_snapshot = self._vectors[:count].copy()
-        node_ids_snapshot = self._node_ids.copy()
-        nodes_snapshot = self._nodes.copy()
-        inverted_index_snapshot = {k: list(v) for k, v in self._inverted_index.items()}
+            vectors_snapshot = self._vectors[:count].copy()
+            node_ids_snapshot = self._node_ids.copy()
+            nodes_snapshot = self._nodes.copy()
+            inverted_index_snapshot = {
+                k: list(v) for k, v in self._inverted_index.items()
+            }
 
         query_dense_np = np.array(dense_vector, dtype=np.float32)
         loop = asyncio.get_running_loop()
@@ -499,6 +502,7 @@ class MemoryIndex(VectorIndex):
                 self._nodes.pop(idx)
 
                 del self._node_id_to_idx[node_id]
+                self._access_times.pop(node_id, None)
 
                 deleted += 1
 
@@ -608,8 +612,16 @@ class MemoryIndex(VectorIndex):
         """
         import aiofiles  # type: ignore[import-untyped]
 
-        count = len(self._node_ids)
-        vectors = self._vectors[:count]
+        async with self._lock:
+            count = len(self._node_ids)
+            vectors_snapshot = self._vectors[:count].copy()
+            node_ids_snapshot = self._node_ids.copy()
+            metadata_snapshot = self._metadata.copy()
+            content_snapshot = self._content.copy()
+            nodes_snapshot = self._nodes.copy()
+            inverted_index_snapshot = {
+                k: list(v) for k, v in self._inverted_index.items()
+            }
 
         logger.debug("Saving index: path=%s, nodes=%d", path, count)
 
@@ -618,23 +630,25 @@ class MemoryIndex(VectorIndex):
 
         # NumPy save via executor (CPU + I/O bound)
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, np.save, path / "vectors.npy", vectors)
+        await loop.run_in_executor(
+            None, np.save, path / "vectors.npy", vectors_snapshot
+        )
 
         # Prepare metadata dict in executor (CPU-bound serialization)
         def prepare_metadata() -> str:
             nodes_serialized = [
                 node.model_dump(exclude={"dense_vector", "sparse_vector"})
-                for node in self._nodes
+                for node in nodes_snapshot
             ]
 
             inverted_index_serialized = {
-                str(k): v for k, v in self._inverted_index.items()
+                str(k): v for k, v in inverted_index_snapshot.items()
             }
 
             metadata_dict: dict[str, Any] = {
-                "node_ids": self._node_ids,
-                "metadata": self._metadata,
-                "content": self._content,
+                "node_ids": node_ids_snapshot,
+                "metadata": metadata_snapshot,
+                "content": content_snapshot,
                 "nodes": nodes_serialized,
                 "inverted_index": inverted_index_serialized,
                 "embedding_dim": self.embedding_dim,
