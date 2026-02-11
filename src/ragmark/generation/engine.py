@@ -67,6 +67,7 @@ class RAGGenerator:
         include_sources: bool = True,
         max_completion: int = 512,
         temperature: float = 0.7,
+        export_artifacts: bool = False,
         monitoring: MonitoringMetric | None = None,
     ) -> AnswerResult:
         """Generate answer for a question using RAG pipeline.
@@ -76,6 +77,7 @@ class RAGGenerator:
             include_sources: Include source references in result.
             max_completion: Tokens reserved for answer generation.
             temperature: Sampling temperature for generation.
+            export_artifacts: Export monitoring artifact summary when enabled.
             monitoring: Optional monitoring orchestrator.
 
         Returns:
@@ -142,7 +144,8 @@ class RAGGenerator:
             sources = [node.node.source_id for node in trace.retrieved_nodes]
             logger.debug("Source extraction completed: sources=%d", len(sources))
 
-        export_monitoring_summary(monitor, artifact_prefix="rag")
+        if export_artifacts:
+            export_monitoring_summary(monitor, artifact_prefix="rag")
 
         return AnswerResult(
             answer=generation_result.text,

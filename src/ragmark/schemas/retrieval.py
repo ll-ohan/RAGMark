@@ -74,7 +74,7 @@ class TraceContext(BaseModel):
         description="Retrieved and ranked nodes",
     )
     retrieval_metadata: dict[str, str | float | int] = Field(
-        default_factory=dict[str, str | float | int],
+        default_factory=dict,
         description="Metadata about the retrieval process (timing, strategy, etc.)",
     )
     reranked: bool = Field(False, description="Whether reranking was applied")

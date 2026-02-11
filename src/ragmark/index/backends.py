@@ -258,15 +258,16 @@ class MemoryIndex(VectorIndex):
                 f"got {len(query_vector)}"
             )
 
-        count = len(self._node_ids)
-        if count == 0:
-            logger.warning("Search on empty index")
-            return []
+        async with self._lock:
+            count = len(self._node_ids)
+            if count == 0:
+                logger.warning("Search on empty index")
+                return []
 
-        vectors_snapshot = self._vectors[:count].copy()
-        metadata_snapshot = self._metadata.copy()
-        node_ids_snapshot = self._node_ids.copy()
-        nodes_snapshot = self._nodes.copy()
+            vectors_snapshot = self._vectors[:count].copy()
+            metadata_snapshot = self._metadata.copy()
+            node_ids_snapshot = self._node_ids.copy()
+            nodes_snapshot = self._nodes.copy()
 
         query_np = np.array(query_vector, dtype=np.float32)
         loop = asyncio.get_running_loop()

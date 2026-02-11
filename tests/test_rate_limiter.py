@@ -110,13 +110,13 @@ class TestRateLimiterTokenBucket:
         """Verifies rate limiter enforces rate limit after initial burst.
 
         Given:
-            RateLimiter configured for 100 requests/second.
+            RateLimiter configured for 10 requests/second.
         When:
             Exhausting initial tokens, then acquiring 20 more.
         Then:
-            Second batch takes approximately 0.2 seconds (20 tokens ÷ 100/s).
+            Second batch takes approximately 2 seconds (20 tokens ÷ 10/s).
         """
-        limiter = RateLimiter(requests_per_second=100.0)
+        limiter = RateLimiter(requests_per_second=10.0)
 
         # Exhaust initial tokens
         await limiter.acquire(tokens=100)
@@ -126,8 +126,8 @@ class TestRateLimiterTokenBucket:
             await limiter.acquire(tokens=1)
         duration = time.time() - start
 
-        # 20 requests at 100/s = 0.2 seconds
-        assert 0.15 < duration < 0.35, f"Duration {duration:.2f}s, expected ~0.2s"
+        # 20 requests at 10/s = ~2 seconds
+        assert 1.8 < duration < 2.2, f"Duration {duration:.2f}s, expected ~2s"
 
     async def test_rate_limiter_should_allow_burst_within_initial_tokens(self) -> None:
         """Verifies initial token bucket allows immediate bursts.

@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from test_context_manager import FakeLLMDriver
 
 from ragmark.generation.context import ContextManager
 from ragmark.generation.engine import RAGGenerator
@@ -37,6 +38,7 @@ class FakeContextManager(ContextManager):
     """
 
     def __init__(self, max_tokens: int = 2048):
+        super().__init__(driver=FakeLLMDriver())
         self.max_tokens = max_tokens
         self.last_fitted_context = ""
         self.last_user_query = ""

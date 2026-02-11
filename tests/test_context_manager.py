@@ -555,7 +555,6 @@ class TestContextManagerEdgeCases:
 
 
 @pytest.mark.unit
-@pytest.mark.benchmark
 @pytest.mark.performance
 class TestContextTruncateMiddlePerformance:
     """Benchmark tests for Context._truncate_middle() deque optimization."""

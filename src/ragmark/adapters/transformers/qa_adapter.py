@@ -131,7 +131,7 @@ class NodeToTrialCaseAdapter(Adapter[KnowledgeNode, TrialCase]):
 
         qa_data = self._get_synthetic_qa(node.metadata) or {}
         qa_model = qa_data.get("model")
-        qa_bactch_id = qa_data.get("batch_id")
+        qa_batch_id = qa_data.get("batch_id")
         qa_generated_at = qa_pair.get("generated_at") or qa_data.get("generated_at")
 
         metadata: dict[str, str | int | float | dict[str, Any] | None] = {
@@ -140,7 +140,7 @@ class NodeToTrialCaseAdapter(Adapter[KnowledgeNode, TrialCase]):
             "qa_index": index,
             "generated_at": qa_generated_at,
             "model": qa_model,
-            "batch_id": qa_bactch_id,
+            "batch_id": qa_batch_id,
         }
 
         metadata["confidence"] = qa_pair.get("confidence", None)

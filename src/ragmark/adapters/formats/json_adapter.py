@@ -58,6 +58,7 @@ class JSONAdapter(FormatAdapter):
         self,
         data: list[dict[str, Any]],
         path: Path,
+        *,
         indent: int = 2,
         **kwargs: Any,
     ) -> None:

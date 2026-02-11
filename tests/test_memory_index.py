@@ -1198,7 +1198,6 @@ class TestAsyncSaveLoadNonBlocking:
 
 
 @pytest.mark.unit
-@pytest.mark.benchmark
 @pytest.mark.performance
 class TestMemoryIndexDeletePerformance:
     """Benchmark tests for MemoryIndex.delete() O(1) optimization."""

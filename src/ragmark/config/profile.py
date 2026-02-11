@@ -571,8 +571,8 @@ class ExperimentProfile(BaseModel):
                 k: ExperimentProfile._resolve_paths(v, base_dir)
                 for k, v in cast(dict[str, Any], data).items()
             }
-        elif type(data) is list[Any]:
-            return [ExperimentProfile._resolve_paths(item, base_dir) for item in data]
+        elif isinstance(data, list):
+            return [ExperimentProfile._resolve_paths(item, base_dir) for item in data]  # pyright: ignore[reportUnknownVariableType]
         elif isinstance(data, str):
             is_path = data.startswith(("./", "../", "/", "~", "\\")) or data.endswith(
                 (".pt", ".gguf", ".jsonl", ".json", ".yaml", ".yml", ".txt")
@@ -600,8 +600,8 @@ class ExperimentProfile(BaseModel):
                     k: convert_paths_to_str(v)
                     for k, v in cast(dict[str, Any], obj).items()
                 }
-            elif type(obj) is list[Any]:
-                return [convert_paths_to_str(item) for item in obj]
+            elif isinstance(obj, list):
+                return [convert_paths_to_str(item) for item in obj]  # pyright: ignore[reportUnknownVariableType]
             return obj
 
         data = self.model_dump(mode="python")

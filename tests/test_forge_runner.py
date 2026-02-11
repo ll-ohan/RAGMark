@@ -636,13 +636,13 @@ class TestForgeRunnerConcurrent:
             source.touch()
 
         start_seq = time.perf_counter()
-        nodes_seq: list[KnowledgeNode] = []
+        nodes_seq: list[KnowledgeNode | Exception] = []
         async for node in runner.process_concurrent(sources, max_concurrency=1):
             nodes_seq.append(node)
         seq_duration = time.perf_counter() - start_seq
 
         start_conc = time.perf_counter()
-        nodes_conc: list[KnowledgeNode] = []
+        nodes_conc: list[KnowledgeNode | Exception] = []
         async for node in runner.process_concurrent(sources, max_concurrency=4):
             nodes_conc.append(node)
         conc_duration = time.perf_counter() - start_conc
@@ -677,7 +677,7 @@ class TestForgeRunnerConcurrent:
             source.touch()
 
         start = time.perf_counter()
-        nodes: list[KnowledgeNode] = []
+        nodes: list[KnowledgeNode | Exception] = []
         async for node in runner.process_concurrent(sources, max_concurrency=3):
             nodes.append(node)
         duration = time.perf_counter() - start
@@ -739,7 +739,7 @@ class TestForgeRunnerConcurrent:
             source.touch()
 
         with pytest.raises(ValueError, match="Simulated ingestion failure"):
-            nodes: list[KnowledgeNode] = []
+            nodes: list[KnowledgeNode | Exception] = []
             async for node in runner.process_concurrent(sources, max_concurrency=2):
                 nodes.append(node)
 
@@ -867,7 +867,6 @@ class TestStreamingMetrics:
         When: The monitor loop runs.
         Then: It should log the error and continue monitoring.
         """
-        import logging
         from unittest.mock import Mock
 
         from ragmark.forge.runner import StreamingMetrics
@@ -1404,7 +1403,7 @@ class TestMetricsIntegration:
         tasks_before = len([t for t in asyncio.all_tasks() if not t.done()])
 
         # When: Run pipeline
-        nodes: list[KnowledgeNode] = []
+        nodes: list[KnowledgeNode | Exception] = []
         async for node in runner.process_concurrent(sources, max_concurrency=2):
             nodes.append(node)
 

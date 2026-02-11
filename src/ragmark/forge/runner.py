@@ -9,7 +9,8 @@ import time
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Any, cast
+
+from typing_extensions import Any
 
 from ragmark.config.profile import ExperimentProfile, StreamingMetricsConfig
 from ragmark.forge.factory import (
@@ -433,7 +434,7 @@ class ForgeRunner:
         sources: Iterable[Path],
         max_concurrency: int = 4,
         monitoring: MonitoringMetric | None = None,
-    ) -> AsyncIterator[KnowledgeNode]:
+    ) -> AsyncIterator[KnowledgeNode | Exception]:
         """Process documents with concurrent ingestion (3-5x speedup, bounded memory).
 
         Parallel workers accelerate I/O-bound ingestion. Queue-based backpressure
@@ -445,7 +446,8 @@ class ForgeRunner:
             monitoring: Optional monitoring orchestrator.
 
         Yields:
-            Knowledge nodes as generated.
+            Knowledge nodes as generated. When fail_fast is False, errors are
+            yielded to the caller for optional inspection.
 
         Raises:
             IngestionError: If ingestion fails (when fail_fast=True).
@@ -555,7 +557,7 @@ class ForgeRunner:
                 else:
                     node_count += 1
 
-                yield cast(KnowledgeNode, item)
+                yield item
 
         self._log_completion(
             start_time, doc_count, node_count, error_count, "concurrent"

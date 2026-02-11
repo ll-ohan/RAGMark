@@ -47,7 +47,7 @@ class TrialCase(BaseModel):
         description="Expected node IDs for retrieval evaluation",
     )
     metadata: dict[str, str | int | float | dict[str, Any] | None] = Field(
-        default_factory=dict[str, str | int | float | dict[str, Any] | None],
+        default_factory=dict,
         description="Additional metadata (difficulty, category, etc.)",
     )
 

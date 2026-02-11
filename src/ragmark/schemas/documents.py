@@ -20,7 +20,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from typing_extensions import TypeAliasType
 
 from ragmark.schemas.qa import SyntheticQAMetadata, SyntheticQAPairData
 
@@ -37,20 +36,9 @@ if TYPE_CHECKING:
         | SyntheticQAPairData
     )
 else:
-    MetadataValue = TypeAliasType(
-        "MetadataValue",
-        (
-            str
-            | int
-            | float
-            | bool
-            | None
-            | list["MetadataValue"]
-            | dict[str, "MetadataValue"]
-            | SyntheticQAMetadata
-            | SyntheticQAPairData
-        ),
-    )
+    # Use permissive runtime alias to avoid TypeError from recursive type evaluation
+    MetadataValue = Any
+
 MetadataDict = dict[str, MetadataValue]
 
 
@@ -72,7 +60,7 @@ class SourceDoc(BaseModel):
 
     content: str = Field(..., description="Raw text content extracted from the source")
     metadata: MetadataDict = Field(
-        default_factory=dict[str, MetadataValue],
+        default_factory=dict,
         description="Custom metadata (title, author, creation_date, etc.)",
     )
     source_id: str = Field(
@@ -184,7 +172,7 @@ class KnowledgeNode(BaseModel):
     content: str = Field(..., description="Text content of this chunk")
     source_id: str = Field(..., description="Reference to parent SourceDoc")
     metadata: MetadataDict = Field(
-        default_factory=dict[str, MetadataValue],
+        default_factory=dict,
         description="Metadata inherited from source plus computed metadata",
     )
     position: NodePosition = Field(..., description="Position within source document")
@@ -268,6 +256,6 @@ class VectorPayload(BaseModel):
     )
     content: str = Field(..., description="Original text content")
     metadata: MetadataDict = Field(
-        default_factory=dict[str, MetadataValue],
+        default_factory=dict,
         description="Full metadata dictionary",
     )

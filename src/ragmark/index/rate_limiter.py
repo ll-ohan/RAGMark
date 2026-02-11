@@ -38,13 +38,17 @@ class RateLimiter:
             now = time.time()
             elapsed = now - self.last_update
 
+            # Refill tokens, capped at capacity to avoid unlimited bursts
             self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
             self.last_update = now
 
             if self.tokens >= tokens:
                 self.tokens -= tokens
-            else:
-                wait_time = (tokens - self.tokens) / self.rate
-                await asyncio.sleep(wait_time)
-                self.tokens = 0
-                self.last_update += wait_time
+                return
+
+            # Compute wait time and reserve the deficit as debt
+            wait_time = (tokens - self.tokens) / self.rate
+            self.tokens -= tokens
+
+        # Release lock before sleeping so other tasks can proceed
+        await asyncio.sleep(wait_time)
