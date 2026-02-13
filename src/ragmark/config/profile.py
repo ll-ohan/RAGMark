@@ -366,7 +366,13 @@ class EvaluationConfig(BaseModel):
 
     metrics: list[
         Literal[
-            "recall@k", "mrr", "ndcg", "precision@k", "faithfulness", "answer_relevancy"
+            "recall@k",
+            "mrr",
+            "ndcg",
+            "precision@k",
+            "faithfulness",
+            "answer_relevancy",
+            "correctness",
         ]
     ] = Field(
         default_factory=lambda: cast(
@@ -378,6 +384,7 @@ class EvaluationConfig(BaseModel):
                     "precision@k",
                     "faithfulness",
                     "answer_relevancy",
+                    "correctness",
                 ]
             ],
             ["recall@k", "mrr"],

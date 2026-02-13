@@ -39,6 +39,7 @@ dependencies = [
     "langdetect>=1.0.9",
     "pandas>=2.3.3",
     "aiofiles>=24.1.0",
+    "psutil>=7.2.2",
 ]
 
 [project.optional-dependencies]
@@ -107,6 +108,7 @@ select = [
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
+per-file-ignores = {"scripts/*.py" = ["B008"]}  # typer.Option() in defaults is standard
 
 [tool.ruff.lint.isort]
 known-first-party = ["ragmark"]

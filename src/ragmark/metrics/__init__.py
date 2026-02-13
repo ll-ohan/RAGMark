@@ -13,6 +13,7 @@ from ragmark.metrics.base import (
 )
 
 # Import concrete metric implementations to trigger auto-registration
+from ragmark.metrics.evaluation.generation import compute_generation_metrics
 from ragmark.metrics.evaluation.retrieval import compute_retrieval_batch
 from ragmark.metrics.registry import MetricRegistry
 from ragmark.schemas.evaluation import CaseResult
@@ -46,4 +47,5 @@ __all__ = [
     "MonitoringMetric",
     "MetricRegistry",
     "compute_retrieval_metrics",
+    "compute_generation_metrics",
 ]

@@ -185,6 +185,16 @@ class EvaluationError(RAGMarkError):
     pass
 
 
+class ArenaError(RAGMarkError):
+    """Raised when arena orchestration fails.
+
+    This includes configuration grid errors, pipeline execution failures
+    during comparative benchmarking, or caching errors.
+    """
+
+    pass
+
+
 class QuestionGenerationError(RAGMarkError):
     """Raised when synthetic QA generation fails.
 
