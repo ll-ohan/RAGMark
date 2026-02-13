@@ -4,6 +4,13 @@ Provides metrics for measuring retrieval quality, generation quality, etc.
 """
 
 # Import and register metrics so they're available
+from ragmark.metrics.evaluation.generation import (  # noqa: F401
+    AnswerRelevancy,
+    Correctness,
+    Faithfulness,
+    JudgePromptConfig,
+    compute_generation_metrics,
+)
 from ragmark.metrics.evaluation.retrieval import (  # noqa: F401
     MAP,
     MRR,
@@ -18,4 +25,9 @@ __all__ = [
     "MRR",
     "NDCG",
     "MAP",
+    "Faithfulness",
+    "AnswerRelevancy",
+    "Correctness",
+    "JudgePromptConfig",
+    "compute_generation_metrics",
 ]

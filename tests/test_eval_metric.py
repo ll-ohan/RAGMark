@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from ragmark.exceptions import EvaluationError
 from ragmark.metrics.base import EvaluationMetric, MetricValidationError
 from ragmark.metrics.evaluation.generation import AnswerRelevancy, Faithfulness
 from ragmark.metrics.evaluation.retrieval import (
@@ -100,23 +101,25 @@ def test_retrieval_metrics_should_raise_when_relevant_ids_missing() -> None:
 
 
 @pytest.mark.unit
-def test_faithfulness_and_relevancy_should_raise_not_implemented() -> None:
-    """Validates generation metrics report not implemented.
+def test_faithfulness_and_relevancy_should_raise_evaluation_error_on_sync_compute() -> (
+    None
+):
+    """Validate generation metrics direct callers to compute_async.
 
     Given:
-        Placeholder faithfulness and answer relevancy metrics.
+        Faithfulness and AnswerRelevancy metric instances.
     When:
-        Calling compute.
+        Calling the synchronous compute method.
     Then:
-        NotImplementedError is raised with explicit guidance.
+        EvaluationError is raised directing callers to use compute_async.
     """
     faithfulness = Faithfulness()
     relevancy = AnswerRelevancy()
 
-    with pytest.raises(NotImplementedError, match="not yet implemented"):
+    with pytest.raises(EvaluationError, match="compute_async"):
         faithfulness.compute(answer="A", context=["B"])
 
-    with pytest.raises(NotImplementedError, match="not yet implemented"):
+    with pytest.raises(EvaluationError, match="compute_async"):
         relevancy.compute(question="Q", answer="A")
 
 
